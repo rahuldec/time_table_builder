@@ -45,6 +45,17 @@ export interface LessonRequirement {
   periodsPerWeek: number;
   roomId?: string; // required room (e.g. a specific lab) - omit for regular classroom subjects
   isLab?: boolean; // overrides subject.isLab if set
+
+  // ----- rule flags, copied from the subject at generation time -----
+  avoidFirstPeriod?: boolean;   // never place this subject in the day's first teaching period
+  avoidLastPeriod?: boolean;    // never place this subject in the day's last teaching period
+  allowRepeatSameDay?: boolean; // if false (default), the same subject won't repeat twice in one day for the same class, unless there's truly no other way to fit it in
+}
+
+// A pair of teachers who should never teach back-to-back for the same class
+export interface TeacherPair {
+  teacherAId: string;
+  teacherBId: string;
 }
 
 export interface TimetableEntry {
@@ -68,4 +79,5 @@ export interface GenerationResult {
   entries: TimetableEntry[];
   unplaced: UnplacedItem[];
   score: number; // lower is better - used to pick best of N random restarts
+  ruleViolations: number; // how many placements had to break a soft rule (repeat-in-day, first/last period, adjacency) to fit everything in
 }
