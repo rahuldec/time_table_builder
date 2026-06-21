@@ -50,3 +50,45 @@ body {
   background: white;
 }
 .input:focus { outline: 2px solid var(--ink-teal-mid); outline-offset: 1px; }
+
+/* ===========================================================
+   Print / PDF export
+   Only the element with id="print-area" is shown when printing.
+   Trigger via window.print() -> choose "Save as PDF" in the dialog.
+   =========================================================== */
+.no-print {
+  /* present on screen, hidden when printing */
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #print-area,
+  #print-area * {
+    visibility: visible;
+  }
+  #print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+  }
+  .no-print {
+    display: none !important;
+  }
+  #print-area table {
+    width: 100%;
+    font-size: 11px;
+  }
+  #print-area .card {
+    border: none;
+    padding: 0;
+  }
+  #print-title {
+    display: block !important;
+    margin-bottom: 12px;
+  }
+}
