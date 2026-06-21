@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabase";
 import { generateTimetable } from "../lib/generator";
-import type { SchoolConfig, Teacher, LessonRequirement } from "../lib/types";
+import type { SchoolConfig, Teacher, LessonRequirement, TeacherPair } from "../lib/types";
 
 interface Status {
   kind: "idle" | "working" | "done" | "error";
   message?: string;
   placed?: number;
   unplaced?: number;
+  ruleViolations?: number;
 }
 
 export default function Generate() {
@@ -31,7 +32,24 @@ export default function Generate() {
         .eq("school_id", school.id);
       if (teacherErr) throw new Error(teacherErr.message);
 
-      // 3. Load lesson requirements
+      // 3. Load subjects (for the rule flags: avoid first/last period, allow repeat same day)
+      const { data: subjectRows, error: subjectErr } = await supabase
+        .from("subjects")
+        .select("id, avoid_first_period, avoid_last_period, allow_repeat_same_day")
+        .eq("school_id", school.id);
+      if (subjectErr) throw new Error(subjectErr.message);
+      const subjectMap = new Map(
+        (subjectRows ?? []).map((s) => [
+          s.id,
+          {
+            avoidFirstPeriod: !!s.avoid_first_period,
+            avoidLastPeriod: !!s.avoid_last_period,
+            allowRepeatSameDay: !!s.allow_repeat_same_day,
+          },
+        ])
+      );
+
+      // 4. Load lesson requirements
       const { data: lessonRows, error: lessonErr } = await supabase
         .from("lesson_requirements")
         .select("*")
@@ -41,6 +59,17 @@ export default function Generate() {
       if (!lessonRows || lessonRows.length === 0) {
         throw new Error("No lesson requirements found. Add them on the Setup page first.");
       }
+
+      // 5. Load teacher pairs that should never be back-to-back for the same class
+      const { data: pairRows, error: pairErr } = await supabase
+        .from("avoid_adjacent_teacher_pairs")
+        .select("teacher_a_id, teacher_b_id")
+        .eq("school_id", school.id);
+      if (pairErr) throw new Error(pairErr.message);
+      const avoidAdjacentTeacherPairs: TeacherPair[] = (pairRows ?? []).map((p) => ({
+        teacherAId: p.teacher_a_id,
+        teacherBId: p.teacher_b_id,
+      }));
 
       setStatus({ kind: "working", message: "Building the timetable (this can take a few seconds)..." });
 
@@ -61,27 +90,34 @@ export default function Generate() {
         })),
       }));
 
-      const lessons: LessonRequirement[] = (lessonRows ?? []).map((l) => ({
-        id: l.id,
-        classSectionId: l.class_section_id,
-        subjectId: l.subject_id,
-        teacherId: l.teacher_id,
-        periodsPerWeek: l.periods_per_week,
-        roomId: l.room_id ?? undefined,
-        isLab: l.is_lab,
-      }));
+      const lessons: LessonRequirement[] = (lessonRows ?? []).map((l) => {
+        const subjFlags = subjectMap.get(l.subject_id);
+        return {
+          id: l.id,
+          classSectionId: l.class_section_id,
+          subjectId: l.subject_id,
+          teacherId: l.teacher_id,
+          periodsPerWeek: l.periods_per_week,
+          roomId: l.room_id ?? undefined,
+          isLab: l.is_lab,
+          avoidFirstPeriod: subjFlags?.avoidFirstPeriod ?? false,
+          avoidLastPeriod: subjFlags?.avoidLastPeriod ?? false,
+          allowRepeatSameDay: subjFlags?.allowRepeatSameDay ?? false,
+        };
+      });
 
       const result = generateTimetable({
         school: schoolConfig,
         teachers,
         classSections: [], // not needed by the algorithm itself
         lessons,
+        avoidAdjacentTeacherPairs,
         attempts: 60,
       });
 
       setStatus({ kind: "working", message: "Saving the timetable..." });
 
-      // 4. Work out the next version number, so old timetables aren't lost
+      // 6. Work out the next version number, so old timetables aren't lost
       const { data: maxVersionRow } = await supabase
         .from("timetable_entries")
         .select("version")
@@ -105,14 +141,21 @@ export default function Generate() {
       const { error: insertErr } = await supabase.from("timetable_entries").insert(rowsToInsert);
       if (insertErr) throw new Error(insertErr.message);
 
+      let message: string;
+      if (result.unplaced.length > 0) {
+        message = `Done, but ${result.unplaced.length} period(s) couldn't be placed — usually means a teacher is overloaded or a room is double-booked. Check the list below.`;
+      } else if (result.ruleViolations > 0) {
+        message = `Done! Every period was placed, but ${result.ruleViolations} rule(s) (e.g. no-repeat-in-day, avoid first/last period, or teacher adjacency) had to be relaxed slightly to fit everything in.`;
+      } else {
+        message = "Done! Every period was placed with no clashes, and every rule was respected.";
+      }
+
       setStatus({
         kind: "done",
         placed: result.entries.length,
         unplaced: result.unplaced.length,
-        message:
-          result.unplaced.length === 0
-            ? "Done! Every period was placed with no clashes."
-            : `Done, but ${result.unplaced.length} period(s) couldn't be placed — usually means a teacher is overloaded or a room is double-booked. Check the list below.`,
+        ruleViolations: result.ruleViolations,
+        message,
       });
 
       if (result.unplaced.length > 0) {
@@ -131,8 +174,9 @@ export default function Generate() {
         </h2>
         <p className="text-sm text-gray-600">
           This reads everything you entered on the Setup page and builds a full draft timetable
-          automatically — making sure no teacher, class, or room is double-booked. You can review
-          and tweak it afterwards on the View Timetable page.
+          automatically — making sure no teacher, class, or room is double-booked, and respecting
+          the rules you've set (teacher unavailability, no-repeat-in-day, avoid first/last period,
+          and teacher adjacency). You can review and tweak it afterwards on the View Timetable page.
         </p>
         <button className="btn-primary" onClick={runGeneration} disabled={status.kind === "working"}>
           {status.kind === "working" ? "Working..." : "Generate timetable"}
@@ -148,7 +192,7 @@ export default function Generate() {
           <p>{status.message}</p>
           {status.kind === "done" && (
             <p className="mt-1 text-gray-600">
-              Placed: {status.placed} periods · Unplaced: {status.unplaced}
+              Placed: {status.placed} periods · Unplaced: {status.unplaced} · Rules relaxed: {status.ruleViolations}
             </p>
           )}
         </div>
