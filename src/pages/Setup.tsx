@@ -19,12 +19,21 @@ interface Subject {
   id: string;
   name: string;
   is_lab: boolean;
+  avoid_first_period: boolean;
+  avoid_last_period: boolean;
+  allow_repeat_same_day: boolean;
 }
 interface Teacher {
   id: string;
   name: string;
   max_periods_per_day: number | null;
   max_periods_per_week: number | null;
+}
+interface TeacherUnavailability {
+  id: string;
+  teacher_id: string;
+  day: string;
+  period: number;
 }
 interface Room {
   id: string;
@@ -39,6 +48,13 @@ interface LessonRequirementRow {
   subjects: { name: string } | null;
   teachers: { name: string } | null;
   rooms: { name: string } | null;
+}
+interface AvoidAdjacentPairRow {
+  id: string;
+  teacher_a_id: string;
+  teacher_b_id: string;
+  teacher_a: { name: string } | null;
+  teacher_b: { name: string } | null;
 }
 
 const ALL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -179,13 +195,26 @@ function ClassSectionsCard({ schoolId, refreshKey }: { schoolId: string; refresh
 function SubjectsCard({ schoolId }: { schoolId: string }) {
   const [name, setName] = useState("");
   const [isLab, setIsLab] = useState(false);
+  const [avoidFirst, setAvoidFirst] = useState(false);
+  const [avoidLast, setAvoidLast] = useState(false);
+  const [allowRepeat, setAllowRepeat] = useState(false);
   const { data, loading, add, remove } = useTable<Subject>("subjects", "*", { school_id: schoolId });
 
   const submit = async () => {
     if (!name.trim()) return;
-    await add({ school_id: schoolId, name: name.trim(), is_lab: isLab });
+    await add({
+      school_id: schoolId,
+      name: name.trim(),
+      is_lab: isLab,
+      avoid_first_period: avoidFirst,
+      avoid_last_period: avoidLast,
+      allow_repeat_same_day: allowRepeat,
+    });
     setName("");
     setIsLab(false);
+    setAvoidFirst(false);
+    setAvoidLast(false);
+    setAllowRepeat(false);
   };
 
   return (
@@ -196,6 +225,7 @@ function SubjectsCard({ schoolId }: { schoolId: string }) {
         </h2>
         <p className="text-sm text-gray-600">
           Tick "Lab" for subjects that need two periods back-to-back (e.g. Computer, Science Lab).
+          The other three checkboxes are scheduling rules for this subject.
         </p>
       </div>
       <div className="flex gap-2 flex-wrap items-center">
@@ -204,19 +234,92 @@ function SubjectsCard({ schoolId }: { schoolId: string }) {
           <input type="checkbox" checked={isLab} onChange={(e) => setIsLab(e.target.checked)} />
           Lab (double period)
         </label>
-        <button className="btn-marigold" onClick={submit}>Add</button>
       </div>
+      <div className="flex gap-4 flex-wrap text-sm text-gray-700">
+        <label className="flex items-center gap-1">
+          <input type="checkbox" checked={avoidFirst} onChange={(e) => setAvoidFirst(e.target.checked)} />
+          Never in first period
+        </label>
+        <label className="flex items-center gap-1">
+          <input type="checkbox" checked={avoidLast} onChange={(e) => setAvoidLast(e.target.checked)} />
+          Never in last period
+        </label>
+        <label className="flex items-center gap-1">
+          <input type="checkbox" checked={allowRepeat} onChange={(e) => setAllowRepeat(e.target.checked)} />
+          Allow twice in one day for the same class
+        </label>
+      </div>
+      <button className="btn-marigold" onClick={submit}>Add</button>
+
       {loading ? <p className="text-sm text-gray-500">Loading...</p> : (
         <ul className="text-sm space-y-1">
           {data.map((s) => (
             <li key={s.id} className="flex justify-between border-b border-gray-100 py-1">
-              <span>{s.name} {s.is_lab && <span className="text-xs text-[var(--marigold-dark)]">(Lab)</span>}</span>
+              <span>
+                {s.name}{" "}
+                {s.is_lab && <span className="text-xs text-[var(--marigold-dark)]">(Lab)</span>}{" "}
+                {s.avoid_first_period && <span className="text-xs text-gray-400">· no 1st period</span>}{" "}
+                {s.avoid_last_period && <span className="text-xs text-gray-400">· no last period</span>}{" "}
+                {s.allow_repeat_same_day && <span className="text-xs text-gray-400">· repeats allowed</span>}
+              </span>
               <button className="text-red-500 hover:underline text-xs" onClick={() => remove(s.id)}>Remove</button>
             </li>
           ))}
         </ul>
       )}
     </div>
+  );
+}
+
+// =====================================================================
+// Teacher unavailability — nested under each teacher (collapsible)
+// =====================================================================
+function TeacherUnavailabilityEditor({ teacherId }: { teacherId: string }) {
+  const { data, loading, add, remove } = useTable<TeacherUnavailability>(
+    "teacher_unavailability",
+    "*",
+    { teacher_id: teacherId }
+  );
+  const [day, setDay] = useState(ALL_DAYS[0]);
+  const [period, setPeriod] = useState("");
+
+  const submit = async () => {
+    const p = parseInt(period, 10);
+    if (isNaN(p)) return;
+    await add({ teacher_id: teacherId, day, period: p });
+    setPeriod("");
+  };
+
+  return (
+    <details className="mt-1 ml-4">
+      <summary className="text-xs text-[var(--ink-teal-mid)] cursor-pointer">
+        Unavailable slots {data.length > 0 ? `(${data.length})` : ""}
+      </summary>
+      <div className="mt-2 flex gap-2 items-center flex-wrap">
+        <select className="input text-xs py-1" value={day} onChange={(e) => setDay(e.target.value)}>
+          {ALL_DAYS.map((d) => (
+            <option key={d} value={d}>{d}</option>
+          ))}
+        </select>
+        <input
+          className="input text-xs py-1 w-20"
+          placeholder="Period #"
+          value={period}
+          onChange={(e) => setPeriod(e.target.value)}
+        />
+        <button className="btn-marigold text-xs py-1 px-2" onClick={submit}>Add</button>
+      </div>
+      {!loading && data.length > 0 && (
+        <ul className="mt-1 text-xs space-y-0.5">
+          {data.map((u) => (
+            <li key={u.id} className="flex justify-between">
+              <span>{u.day} · period {u.period}</span>
+              <button className="text-red-500 hover:underline" onClick={() => remove(u.id)}>Remove</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
   );
 }
 
@@ -247,7 +350,9 @@ function TeachersCard({ schoolId }: { schoolId: string }) {
           4. Teachers
         </h2>
         <p className="text-sm text-gray-600">
-          Max periods/day and max periods/week are optional — leave blank for no limit.
+          Max periods/day and max periods/week are optional — leave blank for no limit. Click
+          "Unavailable slots" under a teacher to block off specific day/period combinations
+          (e.g. part-time staff).
         </p>
       </div>
       <div className="flex gap-2 flex-wrap">
@@ -257,11 +362,85 @@ function TeachersCard({ schoolId }: { schoolId: string }) {
         <button className="btn-marigold" onClick={submit}>Add</button>
       </div>
       {loading ? <p className="text-sm text-gray-500">Loading...</p> : (
-        <ul className="text-sm space-y-1">
+        <ul className="text-sm space-y-2">
           {data.map((t) => (
-            <li key={t.id} className="flex justify-between border-b border-gray-100 py-1">
-              <span>{t.name} {t.max_periods_per_day ? `· max ${t.max_periods_per_day}/day` : ""} {t.max_periods_per_week ? `· max ${t.max_periods_per_week}/week` : ""}</span>
-              <button className="text-red-500 hover:underline text-xs" onClick={() => remove(t.id)}>Remove</button>
+            <li key={t.id} className="border-b border-gray-100 py-1">
+              <div className="flex justify-between">
+                <span>{t.name} {t.max_periods_per_day ? `· max ${t.max_periods_per_day}/day` : ""} {t.max_periods_per_week ? `· max ${t.max_periods_per_week}/week` : ""}</span>
+                <button className="text-red-500 hover:underline text-xs" onClick={() => remove(t.id)}>Remove</button>
+              </div>
+              <TeacherUnavailabilityEditor teacherId={t.id} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// Teachers that should never be back-to-back for the same class
+// =====================================================================
+function AvoidAdjacentTeachersCard({ schoolId }: { schoolId: string }) {
+  const { data: teachers } = useTable<Teacher>("teachers", "*", { school_id: schoolId });
+  const select = "id, teacher_a_id, teacher_b_id, teacher_a:teacher_a_id(name), teacher_b:teacher_b_id(name)";
+  const { data, loading, remove, refresh } = useTable<AvoidAdjacentPairRow>(
+    "avoid_adjacent_teacher_pairs",
+    select,
+    { school_id: schoolId }
+  );
+
+  const [teacherAId, setTeacherAId] = useState("");
+  const [teacherBId, setTeacherBId] = useState("");
+
+  const submit = async () => {
+    if (!teacherAId || !teacherBId || teacherAId === teacherBId) return;
+    const { error } = await supabase.from("avoid_adjacent_teacher_pairs").insert({
+      school_id: schoolId,
+      teacher_a_id: teacherAId,
+      teacher_b_id: teacherBId,
+    });
+    if (!error) {
+      setTeacherAId("");
+      setTeacherBId("");
+      refresh();
+    }
+  };
+
+  return (
+    <div className="card space-y-4">
+      <div>
+        <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
+          5. Teachers that should never be back-to-back
+        </h2>
+        <p className="text-sm text-gray-600">
+          For the same class, these two teachers' periods will be kept apart wherever possible
+          (e.g. avoiding a tiring subject combo, or a handover that needs a gap).
+        </p>
+      </div>
+      <div className="flex gap-2 flex-wrap items-center">
+        <select className="input" value={teacherAId} onChange={(e) => setTeacherAId(e.target.value)}>
+          <option value="">Teacher A</option>
+          {teachers.map((t) => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
+        <select className="input" value={teacherBId} onChange={(e) => setTeacherBId(e.target.value)}>
+          <option value="">Teacher B</option>
+          {teachers.map((t) => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
+        <button className="btn-marigold" onClick={submit}>Add</button>
+      </div>
+      {loading ? <p className="text-sm text-gray-500">Loading...</p> : data.length === 0 ? (
+        <p className="text-sm text-gray-500">Nothing added yet.</p>
+      ) : (
+        <ul className="text-sm space-y-1">
+          {data.map((p) => (
+            <li key={p.id} className="flex justify-between border-b border-gray-100 py-1">
+              <span>{p.teacher_a?.name ?? "—"} ↔ {p.teacher_b?.name ?? "—"}</span>
+              <button className="text-red-500 hover:underline text-xs" onClick={() => remove(p.id)}>Remove</button>
             </li>
           ))}
         </ul>
@@ -288,7 +467,7 @@ function RoomsCard({ schoolId }: { schoolId: string }) {
     <div className="card space-y-4">
       <div>
         <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
-          5. Rooms (optional)
+          6. Rooms (optional)
         </h2>
         <p className="text-sm text-gray-600">Only needed for labs/special rooms that can get double-booked.</p>
       </div>
@@ -361,7 +540,7 @@ function LessonRequirementsCard({ schoolId }: { schoolId: string }) {
     <div className="card space-y-4">
       <div>
         <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
-          6. What each class needs to study (the important part)
+          7. What each class needs to study (the important part)
         </h2>
         <p className="text-sm text-gray-600">
           One row = "this class needs this subject, taught by this teacher, this many times a week."
@@ -468,6 +647,7 @@ export default function Setup() {
           <ClassSectionsCard schoolId={school.id} refreshKey={0} />
           <SubjectsCard schoolId={school.id} />
           <TeachersCard schoolId={school.id} />
+          <AvoidAdjacentTeachersCard schoolId={school.id} />
           <RoomsCard schoolId={school.id} />
           <LessonRequirementsCard schoolId={school.id} />
         </>
