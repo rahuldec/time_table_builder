@@ -101,7 +101,7 @@ export default function Timetable() {
 
   return (
     <div className="max-w-5xl mx-auto p-4 space-y-4">
-      <div className="card space-y-3">
+      <div className="card space-y-3 no-print">
         <div className="flex gap-2 flex-wrap items-center">
           <div className="flex gap-1">
             {(["class", "teacher", "room"] as ViewMode[]).map((m) => (
@@ -121,6 +121,13 @@ export default function Timetable() {
               <option key={o.id} value={o.id}>{o.label}</option>
             ))}
           </select>
+          <button
+            className="btn-marigold"
+            onClick={() => window.print()}
+            disabled={loading || noData || entries.length === 0}
+          >
+            Download as PDF
+          </button>
         </div>
       </div>
 
@@ -129,7 +136,11 @@ export default function Timetable() {
       ) : noData ? (
         <p className="text-sm text-gray-500">No timetable has been generated yet — go to the Generate page first.</p>
       ) : (
-        <div className="card overflow-x-auto">
+        <div id="print-area" className="card overflow-x-auto">
+          <h2 id="print-title" className="hidden font-bold text-base mb-2" style={{ color: "var(--ink-teal)" }}>
+            {mode === "class" ? "Class" : mode === "teacher" ? "Teacher" : "Room"} timetable —{" "}
+            {options.find((o) => o.id === selectedId)?.label ?? ""}
+          </h2>
           <table className="w-full text-xs border-collapse">
             <thead>
               <tr>
