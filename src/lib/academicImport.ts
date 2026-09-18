@@ -18,7 +18,7 @@ function getOrCreateIdMap(
   table: "class_sections" | "subjects" | "teachers",
   schoolId: string,
   matchColumns: string[],
-  wanted: Map<string, Record<string, string>>
+  wanted: Map<string, Record<string, unknown>>
 ): { idByKey: Map<string, string>; addedCount: number } {
   const existing = localDb.select(table, { school_id: schoolId });
 
@@ -30,7 +30,7 @@ function getOrCreateIdMap(
     idByKey.set(key, row.id);
   }
 
-  const toInsert: { key: string; fields: Record<string, string> }[] = [];
+  const toInsert: { key: string; fields: Record<string, unknown> }[] = [];
   for (const [key, fields] of wanted) {
     if (!existingKeys.has(key)) toInsert.push({ key, fields });
   }
@@ -52,9 +52,9 @@ export function importAcademicMappings(
   defaultPeriodsPerWeek: number
 ): ImportSummary {
   // ---- collect unique class sections, subjects, teachers seen in this pull ----
-  const classSectionNames = new Map<string, Record<string, string>>();
-  const subjectNames = new Map<string, Record<string, string>>();
-  const teacherNames = new Map<string, Record<string, string>>();
+  const classSectionNames = new Map<string, Record<string, unknown>>();
+  const subjectNames = new Map<string, Record<string, unknown>>();
+  const teacherNames = new Map<string, Record<string, unknown>>();
   let multiTeacherSubjects = 0;
 
   for (const row of mappings) {
@@ -62,7 +62,16 @@ export function importAcademicMappings(
     classSectionNames.set(csKey, { class_name: row.course, section_name: sectionName(row) });
 
     for (const subject of row.subjects) {
-      subjectNames.set(subject.name, { name: subject.name });
+      // Scholastic subjects go into the timetable by default; co-scholastic
+      // and discipline periods (Art, Discipline, Work Ed, etc.) start off
+      // toggled out — the user can flip them on in section 3 if they want
+      // them scheduled too.
+      if (!subjectNames.has(subject.name)) {
+        subjectNames.set(subject.name, {
+          name: subject.name,
+          included: subject.assessmentModel === "scholastic",
+        });
+      }
       if (subject.employees.length > 1) multiTeacherSubjects++;
       const teacher = subject.employees[0];
       if (teacher) teacherNames.set(teacher.employeeName, { name: teacher.employeeName });

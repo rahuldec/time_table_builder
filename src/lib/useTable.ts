@@ -35,5 +35,10 @@ export function useTable<T extends { id: string }>(
     await refresh();
   };
 
-  return { data, loading, error, refresh, add, remove };
+  const update = async (id: string, patch: Record<string, unknown>) => {
+    localDb.update(table, id, patch);
+    await refresh();
+  };
+
+  return { data, loading, error, refresh, add, remove, update };
 }

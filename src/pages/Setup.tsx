@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { localDb } from "../lib/localDb";
 import { useTable } from "../lib/useTable";
 import { fetchAllSubjectCourseMappings, DEFAULT_ENTITY_ID } from "../lib/academicApi";
@@ -21,6 +21,7 @@ interface Subject {
   id: string;
   name: string;
   is_lab: boolean;
+  included: boolean; // whether this subject is scheduled in the timetable at all
   avoid_first_period: boolean;
   avoid_last_period: boolean;
   allow_repeat_same_day: boolean;
@@ -160,19 +161,27 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [entityId, setEntityId] = useState(DEFAULT_ENTITY_ID);
   const [defaultPeriodsPerWeek, setDefaultPeriodsPerWeek] = useState("5");
+  const lastFetchedRef = useRef<string | null>(null);
+  const periodsRef = useRef(defaultPeriodsPerWeek);
+  useEffect(() => {
+    periodsRef.current = defaultPeriodsPerWeek;
+  }, [defaultPeriodsPerWeek]);
 
-  const runImport = async () => {
+  const runImport = async (idOverride?: string) => {
+    const id = (idOverride ?? entityId).trim();
+    if (!id) return;
     setLoading(true);
     setError(null);
     setSummary(null);
     try {
-      const mappings = await fetchAllSubjectCourseMappings(entityId);
+      const mappings = await fetchAllSubjectCourseMappings(id);
       const result = await importAcademicMappings(
         schoolId,
         mappings,
-        parseInt(defaultPeriodsPerWeek, 10) || 5
+        parseInt(periodsRef.current, 10) || 5
       );
       setSummary(result);
+      lastFetchedRef.current = id;
       onImported();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import failed");
@@ -181,6 +190,16 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
     }
   };
 
+  // Auto-fetch once a full, valid-looking entity id (a 24-character Mongo
+  // ObjectId) has been typed/pasted in — no need to click the button.
+  useEffect(() => {
+    const id = entityId.trim();
+    if (!/^[a-f0-9]{24}$/i.test(id) || id === lastFetchedRef.current) return;
+    const timer = setTimeout(() => runImport(id), 600);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityId, schoolId]);
+
   return (
     <div className="card space-y-4">
       <div>
@@ -188,10 +207,11 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
           Import from Academic API (OD3)
         </h2>
         <p className="text-sm text-gray-600">
-          Pulls classes, sections, subjects and their assigned teachers from the entity's ERP and
-          adds anything not already here. Safe to run again later — it skips what's already
-          imported. New lesson requirements are created with the periods/week below; edit them in
-          section 7 afterwards if a subject needs a different count.
+          Paste the entity ID below and it fetches automatically — pulling every class, section,
+          subject and their assigned teachers from that entity's ERP. Safe to run again later (for
+          this or a different entity) — it skips what's already here. New lesson requirements are
+          created with the periods/week below; edit them in section 7 afterwards if a subject needs
+          a different count.
         </p>
       </div>
       <div className="flex gap-2 items-center flex-wrap">
@@ -209,7 +229,7 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
           value={defaultPeriodsPerWeek}
           onChange={(e) => setDefaultPeriodsPerWeek(e.target.value)}
         />
-        <button className="btn-primary" onClick={runImport} disabled={loading || !entityId.trim()}>
+        <button className="btn-primary" onClick={() => runImport()} disabled={loading || !entityId.trim()}>
           {loading ? "Importing..." : "Fetch & import"}
         </button>
       </div>
@@ -284,7 +304,7 @@ function SubjectsCard({ schoolId }: { schoolId: string }) {
   const [avoidFirst, setAvoidFirst] = useState(false);
   const [avoidLast, setAvoidLast] = useState(false);
   const [allowRepeat, setAllowRepeat] = useState(false);
-  const { data, loading, add, remove } = useTable<Subject>("subjects", { school_id: schoolId });
+  const { data, loading, add, remove, update } = useTable<Subject>("subjects", { school_id: schoolId });
 
   const submit = async () => {
     if (!name.trim()) return;
@@ -292,6 +312,7 @@ function SubjectsCard({ schoolId }: { schoolId: string }) {
       school_id: schoolId,
       name: name.trim(),
       is_lab: isLab,
+      included: true,
       avoid_first_period: avoidFirst,
       avoid_last_period: avoidLast,
       allow_repeat_same_day: allowRepeat,
@@ -311,7 +332,9 @@ function SubjectsCard({ schoolId }: { schoolId: string }) {
         </h2>
         <p className="text-sm text-gray-600">
           Tick "Lab" for subjects that need two periods back-to-back (e.g. Computer, Science Lab).
-          The other three checkboxes are scheduling rules for this subject.
+          The other three checkboxes are scheduling rules for this subject. Use "In timetable" to
+          decide whether a subject actually gets scheduled — off by default for anything pulled in
+          as co-scholastic/discipline via the Academic API import.
         </p>
       </div>
       <div className="flex gap-2 flex-wrap items-center">
@@ -340,7 +363,7 @@ function SubjectsCard({ schoolId }: { schoolId: string }) {
       {loading ? <p className="text-sm text-gray-500">Loading...</p> : (
         <ul className="text-sm space-y-1">
           {data.map((s) => (
-            <li key={s.id} className="flex justify-between border-b border-gray-100 py-1">
+            <li key={s.id} className="flex justify-between items-center border-b border-gray-100 py-1">
               <span>
                 {s.name}{" "}
                 {s.is_lab && <span className="text-xs text-[var(--marigold-dark)]">(Lab)</span>}{" "}
@@ -348,7 +371,17 @@ function SubjectsCard({ schoolId }: { schoolId: string }) {
                 {s.avoid_last_period && <span className="text-xs text-gray-400">· no last period</span>}{" "}
                 {s.allow_repeat_same_day && <span className="text-xs text-gray-400">· repeats allowed</span>}
               </span>
-              <button className="text-red-500 hover:underline text-xs" onClick={() => remove(s.id)}>Remove</button>
+              <span className="flex items-center gap-3 shrink-0">
+                <label className="flex items-center gap-1 text-xs text-gray-600">
+                  <input
+                    type="checkbox"
+                    checked={s.included !== false}
+                    onChange={(e) => update(s.id, { included: e.target.checked })}
+                  />
+                  In timetable
+                </label>
+                <button className="text-red-500 hover:underline text-xs" onClick={() => remove(s.id)}>Remove</button>
+              </span>
             </li>
           ))}
         </ul>
@@ -704,10 +737,24 @@ export default function Setup() {
   const [loadingSchool, setLoadingSchool] = useState(true);
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
 
+  // A school record always exists after this runs — there's no "save
+  // school settings to unlock the rest" gate. If none exists yet (first
+  // visit in this browser), a blank draft is created so the Academic API
+  // import (and everything else) is usable immediately; School settings
+  // further down still defaults to Mon–Sat / 8 periods and can be edited
+  // any time.
   const loadSchool = async () => {
     setLoadingSchool(true);
-    const rows = localDb.select("schools");
-    setSchool((rows[0] as unknown as School) ?? null);
+    let rows = localDb.select("schools");
+    if (rows.length === 0) {
+      rows = localDb.insert("schools", {
+        name: "",
+        working_days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+        periods_per_day: 8,
+        blocked_periods: [],
+      });
+    }
+    setSchool(rows[0] as unknown as School);
     setLoadingSchool(false);
   };
 
@@ -715,30 +762,23 @@ export default function Setup() {
     loadSchool();
   }, []);
 
-  if (loadingSchool) return <p className="p-6 text-sm text-gray-500">Loading...</p>;
+  if (loadingSchool || !school) return <p className="p-6 text-sm text-gray-500">Loading...</p>;
 
   return (
     <div className="max-w-3xl mx-auto p-4 space-y-6">
+      <AcademicImportCard
+        schoolId={school.id}
+        onImported={() => setDataRefreshKey((k) => k + 1)}
+      />
       <SchoolSettings school={school} onSaved={loadSchool} />
-      {school && (
-        <>
-          <AcademicImportCard
-            schoolId={school.id}
-            onImported={() => setDataRefreshKey((k) => k + 1)}
-          />
-          <div key={dataRefreshKey} className="space-y-6">
-            <ClassSectionsCard schoolId={school.id} refreshKey={0} />
-            <SubjectsCard schoolId={school.id} />
-            <TeachersCard schoolId={school.id} />
-            <AvoidAdjacentTeachersCard schoolId={school.id} />
-            <RoomsCard schoolId={school.id} />
-            <LessonRequirementsCard schoolId={school.id} />
-          </div>
-        </>
-      )}
-      {!school && (
-        <p className="text-sm text-gray-500">Save your school settings above to unlock the rest of the setup.</p>
-      )}
+      <div key={dataRefreshKey} className="space-y-6">
+        <ClassSectionsCard schoolId={school.id} refreshKey={0} />
+        <SubjectsCard schoolId={school.id} />
+        <TeachersCard schoolId={school.id} />
+        <AvoidAdjacentTeachersCard schoolId={school.id} />
+        <RoomsCard schoolId={school.id} />
+        <LessonRequirementsCard schoolId={school.id} />
+      </div>
     </div>
   );
 }

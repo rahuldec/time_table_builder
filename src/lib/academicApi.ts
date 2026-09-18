@@ -31,6 +31,8 @@ export interface AcademicSubject {
   mode: string;
   sequenceNo: number;
   employees: AcademicEmployee[];
+  // "scholastic" | "co-scholastic" | "discipline"
+  assessmentModel: string;
 }
 
 export interface AcademicCourseMapping {

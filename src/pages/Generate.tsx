@@ -24,12 +24,14 @@ export default function Generate() {
       // 2. Load teachers (+ unavailability)
       const teacherRows = localDb.select("teachers", { school_id: school.id as string });
 
-      // 3. Load subjects (for the rule flags: avoid first/last period, allow repeat same day)
+      // 3. Load subjects (for the rule flags: avoid first/last period, allow repeat same day,
+      // and whether this subject is toggled on for the timetable at all)
       const subjectRows = localDb.select("subjects", { school_id: school.id as string });
       const subjectMap = new Map(
         subjectRows.map((s) => [
           s.id,
           {
+            included: s.included !== false,
             avoidFirstPeriod: !!s.avoid_first_period,
             avoidLastPeriod: !!s.avoid_last_period,
             allowRepeatSameDay: !!s.allow_repeat_same_day,
@@ -37,11 +39,15 @@ export default function Generate() {
         ])
       );
 
-      // 4. Load lesson requirements
-      const lessonRows = localDb.select("lesson_requirements", { school_id: school.id as string });
+      // 4. Load lesson requirements, skipping any subject that's toggled off
+      const lessonRows = localDb
+        .select("lesson_requirements", { school_id: school.id as string })
+        .filter((l) => subjectMap.get(l.subject_id as string)?.included !== false);
 
       if (lessonRows.length === 0) {
-        throw new Error("No lesson requirements found. Add them on the Setup page first.");
+        throw new Error(
+          "No lesson requirements to schedule. Add them on the Setup page first, and make sure at least one subject is toggled on."
+        );
       }
 
       // 5. Load teacher pairs that should never be back-to-back for the same class
