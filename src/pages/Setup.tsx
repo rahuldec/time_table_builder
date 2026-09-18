@@ -792,6 +792,9 @@ export default function Setup() {
   const [school, setSchool] = useState<School | null>(null);
   const [loadingSchool, setLoadingSchool] = useState(true);
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const activeIndexRef = useRef(0); // mirrors activeIndex without waiting for a re-render
+  const scrollerRef = useRef<HTMLDivElement>(null);
 
   // A school record always exists after this runs — there's no "save
   // school settings to unlock the rest" gate. If none exists yet (first
@@ -818,51 +821,134 @@ export default function Setup() {
     loadSchool();
   }, []);
 
+  // Bumps dataRefreshKey, which remounts the scroller (key={dataRefreshKey}
+  // below) with fresh data and — since a fresh element always starts at
+  // scrollLeft 0 — lands back on the first panel automatically.
+  const handleImported = () => {
+    setDataRefreshKey((k) => k + 1);
+    activeIndexRef.current = 0;
+    setActiveIndex(0);
+  };
+
+  const scrollToIndex = (i: number) => {
+    const el = scrollerRef.current?.children[i] as HTMLElement | undefined;
+    // "instant" (not "smooth") deliberately — smooth scroll animations
+    // depend on the compositor actually ticking frames, which some
+    // browser/automation contexts skip, silently leaving the scroll
+    // half-finished. Instant is a hard guarantee it lands correctly.
+    el?.scrollIntoView({ behavior: "instant", inline: "start", block: "nearest" });
+    // Set directly rather than relying solely on the scroll listener below
+    // to infer it afterwards — we already know exactly which index this is.
+    // The ref updates synchronously (state doesn't, until the next render),
+    // so back-to-back clicks — e.g. mashing "next" — each see the true
+    // current index instead of one stale from before the first click.
+    activeIndexRef.current = i;
+    setActiveIndex(i);
+  };
+
+  const handleScroll = () => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    let closest = 0;
+    let closestDist = Infinity;
+    Array.from(scroller.children).forEach((c, i) => {
+      const dist = Math.abs((c as HTMLElement).offsetLeft - scroller.scrollLeft);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closest = i;
+      }
+    });
+    activeIndexRef.current = closest;
+    setActiveIndex(closest);
+  };
+
   if (loadingSchool || !school) return <p className="p-6 text-sm text-gray-500">Loading...</p>;
 
+  const sections = [
+    {
+      id: "import",
+      label: "Import",
+      content: (
+        <AcademicImportCard schoolId={school.id} onImported={handleImported} />
+      ),
+    },
+    { id: "school", label: "School settings", content: <SchoolSettings school={school} onSaved={loadSchool} /> },
+    { id: "subjects", label: "Subjects", content: <SubjectsCard schoolId={school.id} /> },
+    { id: "classes", label: "Classes", content: <ClassSectionsCard schoolId={school.id} refreshKey={0} /> },
+    { id: "teachers", label: "Teachers", content: <TeachersCard schoolId={school.id} /> },
+    { id: "pairs", label: "Avoid back-to-back", content: <AvoidAdjacentTeachersCard schoolId={school.id} /> },
+    { id: "rooms", label: "Rooms", content: <RoomsCard schoolId={school.id} /> },
+    { id: "requirements", label: "Requirements", content: <LessonRequirementsCard schoolId={school.id} /> },
+  ];
+
   return (
-    <div className="max-w-3xl mx-auto p-4 space-y-6">
-      {/* ---- The everyday path: import, confirm subjects, generate. ---- */}
-      <AcademicImportCard
-        schoolId={school.id}
-        onImported={() => setDataRefreshKey((k) => k + 1)}
-      />
-      <SchoolSettings school={school} onSaved={loadSchool} />
-      <div key={dataRefreshKey}>
-        <SubjectsCard schoolId={school.id} />
+    <div className="max-w-3xl mx-auto p-4 space-y-4">
+      {/* ---- step pills: click to jump to any section ---- */}
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+        {sections.map((s, i) => (
+          <button
+            key={s.id}
+            onClick={() => scrollToIndex(i)}
+            className={`shrink-0 px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+              activeIndex === i
+                ? "bg-[var(--ink-teal)] text-white border-[var(--ink-teal)]"
+                : "border-gray-300 text-gray-600 hover:border-[var(--ink-teal)]"
+            }`}
+          >
+            {i + 1}. {s.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-gray-400 -mt-2">Swipe, scroll, or use ‹ › to move between sections.</p>
+
+      {/* ---- the sections themselves, one screen-width panel each ---- */}
+      <div className="relative">
+        <button
+          onClick={() => scrollToIndex(Math.max(0, activeIndexRef.current - 1))}
+          disabled={activeIndex === 0}
+          aria-label="Previous section"
+          className="hidden sm:flex absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 w-9 h-9 rounded-full bg-white border border-gray-300 shadow items-center justify-center text-lg disabled:opacity-0 disabled:pointer-events-none"
+        >
+          ‹
+        </button>
+
+        <div
+          ref={scrollerRef}
+          onScroll={handleScroll}
+          key={dataRefreshKey}
+          className="flex overflow-x-auto snap-x snap-proximity scroll-smooth"
+        >
+          {sections.map((s) => (
+            <div key={s.id} className="snap-start shrink-0 w-full px-1">
+              <div className="max-h-[65vh] overflow-y-auto pr-1">{s.content}</div>
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={() => scrollToIndex(Math.min(sections.length - 1, activeIndexRef.current + 1))}
+          disabled={activeIndex === sections.length - 1}
+          aria-label="Next section"
+          className="hidden sm:flex absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-10 w-9 h-9 rounded-full bg-white border border-gray-300 shadow items-center justify-center text-lg disabled:opacity-0 disabled:pointer-events-none"
+        >
+          ›
+        </button>
       </div>
 
+      {/* ---- always-visible, regardless of which section is in view ---- */}
       <div className="card flex items-center justify-between gap-4 flex-wrap" style={{ background: "var(--ink-teal-light)" }}>
         <div>
           <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
             Ready?
           </h2>
           <p className="text-sm text-gray-600">
-            Once the subjects above look right, build the timetable.
+            Once the subjects look right, build the timetable.
           </p>
         </div>
         <Link to="/generate" className="btn-primary whitespace-nowrap">
           Generate timetable →
         </Link>
       </div>
-
-      {/* ---- Everything below is populated automatically by the import ----
-          above; most schools never need to open this. It's here for manual
-          fixes: adding a class the ERP doesn't have yet, capping a
-          teacher's load, keeping two teachers apart, shared rooms, or
-          tweaking an individual periods/week count. */}
-      <details className="card" key={`${dataRefreshKey}-advanced`}>
-        <summary className="font-bold text-lg cursor-pointer select-none" style={{ color: "var(--ink-teal)" }}>
-          Advanced: edit classes, teachers, rooms & requirements manually
-        </summary>
-        <div className="space-y-6 mt-4">
-          <ClassSectionsCard schoolId={school.id} refreshKey={0} />
-          <TeachersCard schoolId={school.id} />
-          <AvoidAdjacentTeachersCard schoolId={school.id} />
-          <RoomsCard schoolId={school.id} />
-          <LessonRequirementsCard schoolId={school.id} />
-        </div>
-      </details>
     </div>
   );
 }
