@@ -244,12 +244,35 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
 }
 
 // =====================================================================
-// Class Sections
+// Class picker — the one place classes live now. Add/remove classes here,
+// and pick one or more to focus Subjects/Teachers on just what those
+// classes study instead of the school's full lists. The selection is
+// purely a filter: toggling a subject or teacher on Subjects/Teachers
+// still affects it everywhere it's used, not just the selected classes.
+// No classes selected = "All classes" = show everything.
 // =====================================================================
-function ClassSectionsCard({ schoolId, refreshKey }: { schoolId: string; refreshKey: number }) {
+function ClassSelectorCard({
+  schoolId,
+  selectedClassIds,
+  onChange,
+}: {
+  schoolId: string;
+  selectedClassIds: string[];
+  // Accepts a plain array or a React-style updater — always use the
+  // updater form when the next value depends on the previous one (see
+  // `toggle` below). Passed straight through from a useState setter,
+  // which guarantees each call sees the true latest state even when
+  // several toggles fire in the same tick (e.g. clicking two chips fast).
+  onChange: (value: string[] | ((prev: string[]) => string[])) => void;
+}) {
   const [className, setClassName] = useState("");
   const [sectionName, setSectionName] = useState("");
   const { data, loading, add, remove } = useTable<ClassSection>("class_sections", { school_id: schoolId });
+  const sorted = [...data].sort(
+    (a, b) =>
+      a.class_name.localeCompare(b.class_name, undefined, { numeric: true }) ||
+      a.section_name.localeCompare(b.section_name, undefined, { numeric: true })
+  );
 
   const submit = async () => {
     if (!className.trim() || !sectionName.trim()) return;
@@ -258,67 +281,11 @@ function ClassSectionsCard({ schoolId, refreshKey }: { schoolId: string; refresh
     setSectionName("");
   };
 
-  return (
-    <div className="card space-y-4" key={refreshKey}>
-      <div>
-        <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
-          Classes & sections
-        </h2>
-        <p className="text-sm text-gray-600">e.g. Class "Grade 6", Section "Ganges"</p>
-      </div>
-      <div className="flex gap-2 flex-wrap">
-        <input className="input" placeholder="Class (e.g. Grade 6)" value={className} onChange={(e) => setClassName(e.target.value)} />
-        <input className="input" placeholder="Section (e.g. Ganges)" value={sectionName} onChange={(e) => setSectionName(e.target.value)} />
-        <button className="btn-marigold" onClick={submit}>Add</button>
-      </div>
-      {loading ? (
-        <p className="text-sm text-gray-500">Loading...</p>
-      ) : data.length === 0 ? (
-        <p className="text-sm text-gray-500">Nothing added yet.</p>
-      ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-          {[...data]
-            .sort(
-              (a, b) =>
-                a.class_name.localeCompare(b.class_name, undefined, { numeric: true }) ||
-                a.section_name.localeCompare(b.section_name, undefined, { numeric: true })
-            )
-            .map((c) => (
-              <div
-                key={c.id}
-                className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 px-3 py-1.5 text-sm"
-              >
-                <span className="truncate">{c.class_name} — {c.section_name}</span>
-                <button className="text-red-400 hover:text-red-600 text-xs shrink-0" title="Remove" onClick={() => remove(c.id)}>✕</button>
-              </div>
-            ))}
-        </div>
-      )}
-    </div>
-  );
-}
+  const toggle = (id: string) => {
+    onChange((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
 
-// =====================================================================
-// Class picker — lets you focus Subjects/Teachers on one class at a time
-// instead of the full school-wide lists. Purely a filter: toggling a
-// subject or teacher here still affects it everywhere it's used, not
-// just the selected class.
-// =====================================================================
-function ClassSelectorCard({
-  schoolId,
-  selectedClassId,
-  onSelect,
-}: {
-  schoolId: string;
-  selectedClassId: string;
-  onSelect: (id: string) => void;
-}) {
-  const { data, loading } = useTable<ClassSection>("class_sections", { school_id: schoolId });
-  const sorted = [...data].sort(
-    (a, b) =>
-      a.class_name.localeCompare(b.class_name, undefined, { numeric: true }) ||
-      a.section_name.localeCompare(b.section_name, undefined, { numeric: true })
-  );
+  const allSelected = selectedClassIds.length === 0;
 
   return (
     <div className="card space-y-4">
@@ -327,30 +294,71 @@ function ClassSelectorCard({
           Class
         </h2>
         <p className="text-sm text-gray-600">
-          Pick a class to make the Subjects and Teachers sections show just what that class
-          studies, instead of the school's full lists. Switch back to "All classes" any time.
+          Pick one or more classes to make the Subjects and Teachers sections show just what those
+          classes study, instead of the school's full lists. Click "All classes" to clear the
+          selection and see everything again.
         </p>
+      </div>
+      <div className="flex gap-2 flex-wrap">
+        <input className="input" placeholder="Class (e.g. Grade 6)" value={className} onChange={(e) => setClassName(e.target.value)} />
+        <input className="input" placeholder="Section (e.g. Ganges)" value={sectionName} onChange={(e) => setSectionName(e.target.value)} />
+        <button className="btn-marigold" onClick={submit}>Add</button>
       </div>
       {loading ? (
         <p className="text-sm text-gray-500">Loading...</p>
       ) : sorted.length === 0 ? (
-        <p className="text-sm text-gray-500">
-          No classes yet — import from the Academic API, or add one in the Classes & Sections
-          section.
-        </p>
+        <p className="text-sm text-gray-500">No classes yet — import from the Academic API, or add one above.</p>
       ) : (
-        <select
-          className="input w-full sm:w-80"
-          value={selectedClassId}
-          onChange={(e) => onSelect(e.target.value)}
-        >
-          <option value="">All classes</option>
-          {sorted.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.class_name} — {c.section_name}
-            </option>
-          ))}
-        </select>
+        <>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => onChange([])}
+              className={`px-3 py-1 rounded-full text-sm border transition-colors ${
+                allSelected
+                  ? "bg-[var(--ink-teal)] text-white border-[var(--ink-teal)]"
+                  : "border-gray-300 text-gray-600 hover:border-[var(--ink-teal)]"
+              }`}
+            >
+              All classes
+            </button>
+            {!allSelected && (
+              <span className="text-xs text-gray-400">
+                {selectedClassIds.length} selected
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            {sorted.map((c) => {
+              const selected = selectedClassIds.includes(c.id);
+              return (
+                <div
+                  key={c.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => toggle(c.id)}
+                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && toggle(c.id)}
+                  className={`flex items-center justify-between gap-2 cursor-pointer rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+                    selected ? "border-[var(--ink-teal)]" : "border-gray-200 hover:border-gray-300"
+                  }`}
+                  style={selected ? { background: "var(--ink-teal-light)" } : undefined}
+                >
+                  <span className="truncate">{c.class_name} — {c.section_name}</span>
+                  <button
+                    className="text-red-400 hover:text-red-600 text-xs shrink-0"
+                    title="Remove"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      remove(c.id);
+                      onChange((prev) => prev.filter((x) => x !== c.id));
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );
@@ -359,7 +367,7 @@ function ClassSelectorCard({
 // =====================================================================
 // Subjects
 // =====================================================================
-function SubjectsCard({ schoolId, classSectionId }: { schoolId: string; classSectionId?: string }) {
+function SubjectsCard({ schoolId, classSectionIds }: { schoolId: string; classSectionIds?: string[] }) {
   const [name, setName] = useState("");
   const [isLab, setIsLab] = useState(false);
   const [avoidFirst, setAvoidFirst] = useState(false);
@@ -367,12 +375,15 @@ function SubjectsCard({ schoolId, classSectionId }: { schoolId: string; classSec
   const [allowRepeat, setAllowRepeat] = useState(false);
   const { data: allData, loading, add, remove, update } = useTable<Subject>("subjects", { school_id: schoolId });
 
-  // When a class is picked (section 3), only show subjects actually taught
-  // to that class — i.e. ones with a lesson requirement linking them.
-  const allowedSubjectIds = classSectionId
+  // When one or more classes are picked (section 3), only show subjects
+  // actually taught to at least one of them — i.e. ones with a matching
+  // lesson requirement.
+  const hasClassFilter = !!classSectionIds && classSectionIds.length > 0;
+  const allowedSubjectIds = hasClassFilter
     ? new Set(
         localDb
-          .select("lesson_requirements", { school_id: schoolId, class_section_id: classSectionId })
+          .select("lesson_requirements", { school_id: schoolId })
+          .filter((r) => classSectionIds!.includes(r.class_section_id as string))
           .map((r) => r.subject_id)
       )
     : null;
@@ -436,15 +447,15 @@ function SubjectsCard({ schoolId, classSectionId }: { schoolId: string; classSec
         <p className="text-sm text-gray-500">Loading...</p>
       ) : data.length === 0 ? (
         <p className="text-sm text-gray-500">
-          {classSectionId
-            ? "This class has no subjects yet — add them in the Requirements section, or pick \"All classes\" above to see the full list."
+          {hasClassFilter
+            ? "These classes have no subjects yet — add them in the Requirements section, or pick \"All classes\" in the Class section to see the full list."
             : "Nothing added yet."}
         </p>
       ) : (
         <>
           <p className="text-xs text-gray-400">
             {data.length} subject{data.length === 1 ? "" : "s"}
-            {classSectionId ? " for this class" : ""} · unchecked ones are skipped when
+            {hasClassFilter ? " for the selected class(es)" : ""} · unchecked ones are skipped when
             generating
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -550,18 +561,20 @@ function TeacherUnavailabilityEditor({ teacherId }: { teacherId: string }) {
 // =====================================================================
 // Teachers
 // =====================================================================
-function TeachersCard({ schoolId, classSectionId }: { schoolId: string; classSectionId?: string }) {
+function TeachersCard({ schoolId, classSectionIds }: { schoolId: string; classSectionIds?: string[] }) {
   const [name, setName] = useState("");
   const [maxDay, setMaxDay] = useState("");
   const [maxWeek, setMaxWeek] = useState("");
   const { data: allData, loading, add, remove } = useTable<Teacher>("teachers", { school_id: schoolId });
 
   // Same class-based filter as Subjects: only teachers actually assigned to
-  // the picked class via a lesson requirement.
-  const allowedTeacherIds = classSectionId
+  // at least one of the picked classes via a lesson requirement.
+  const hasClassFilter = !!classSectionIds && classSectionIds.length > 0;
+  const allowedTeacherIds = hasClassFilter
     ? new Set(
         localDb
-          .select("lesson_requirements", { school_id: schoolId, class_section_id: classSectionId })
+          .select("lesson_requirements", { school_id: schoolId })
+          .filter((r) => classSectionIds!.includes(r.class_section_id as string))
           .map((r) => r.teacher_id)
       )
     : null;
@@ -600,14 +613,14 @@ function TeachersCard({ schoolId, classSectionId }: { schoolId: string; classSec
         <p className="text-sm text-gray-500">Loading...</p>
       ) : data.length === 0 ? (
         <p className="text-sm text-gray-500">
-          {classSectionId
-            ? "No teacher is assigned to this class yet — add one in the Requirements section, or pick \"All classes\" above to see the full list."
+          {hasClassFilter
+            ? "No teacher is assigned to these classes yet — add one in the Requirements section, or pick \"All classes\" in the Class section to see the full list."
             : "Nothing added yet."}
         </p>
       ) : (
         <>
           <p className="text-xs text-gray-400">
-            {data.length} teacher{data.length === 1 ? "" : "s"}{classSectionId ? " for this class" : ""}
+            {data.length} teacher{data.length === 1 ? "" : "s"}{hasClassFilter ? " for the selected class(es)" : ""}
           </p>
           <ul className="text-sm divide-y divide-gray-100">
             {[...data]
@@ -875,7 +888,7 @@ export default function Setup() {
   const [activeIndex, setActiveIndex] = useState(0);
   const activeIndexRef = useRef(0); // mirrors activeIndex without waiting for a re-render
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const [selectedClassId, setSelectedClassId] = useState(""); // "" = all classes
+  const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]); // [] = all classes
 
   // A school record always exists after this runs — there's no "save
   // school settings to unlock the rest" gate. If none exists yet (first
@@ -965,26 +978,20 @@ export default function Setup() {
       label: "Class",
       remountOnImport: true,
       content: (
-        <ClassSelectorCard schoolId={school.id} selectedClassId={selectedClassId} onSelect={setSelectedClassId} />
+        <ClassSelectorCard schoolId={school.id} selectedClassIds={selectedClassIds} onChange={setSelectedClassIds} />
       ),
     },
     {
       id: "subjects",
       label: "Subjects",
       remountOnImport: true,
-      content: <SubjectsCard schoolId={school.id} classSectionId={selectedClassId || undefined} />,
+      content: <SubjectsCard schoolId={school.id} classSectionIds={selectedClassIds} />,
     },
     {
       id: "teachers",
       label: "Teachers",
       remountOnImport: true,
-      content: <TeachersCard schoolId={school.id} classSectionId={selectedClassId || undefined} />,
-    },
-    {
-      id: "classes",
-      label: "Classes & Sections",
-      remountOnImport: true,
-      content: <ClassSectionsCard schoolId={school.id} refreshKey={0} />,
+      content: <TeachersCard schoolId={school.id} classSectionIds={selectedClassIds} />,
     },
     {
       id: "pairs",

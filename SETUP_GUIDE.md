@@ -52,7 +52,7 @@ or edit the same timetable. If that's ever needed, say so and we can add a share
 The app has 3 tabs at the top:
 
 ### 1. Setup
-Setup is a horizontal strip of 9 sections — numbered pills at the top jump straight to any of
+Setup is a horizontal strip of 8 sections — numbered pills at the top jump straight to any of
 them, and `‹ ›` arrows (or swiping/scrolling) step through one at a time. Nothing is gated behind
 an earlier step, and the **"Generate timetable →"** button stays visible underneath no matter which
 section you're on.
@@ -63,22 +63,23 @@ section you're on.
    later — for the same entity or a different one — it skips anything already imported.
 2. **School settings** — working days, periods per day, which periods are breaks. Defaults to
    Mon–Sat / 8 periods if you don't touch it; adjust and save whenever.
-3. **Class** — pick one class, and the Subjects and Teachers sections below narrow down to just
-   what that class actually studies (instead of the school's full lists) — handy for reviewing one
-   class at a time after a big import. It's a display filter only: toggling a subject on/off here
-   still affects that subject everywhere it's used, not just this one class. Leave it on
-   "All classes" to see everything, same as before.
-4. **Subjects** — shows the subjects for whichever class is picked above (or all of them). Each has
-   an **"In timetable"** toggle — scholastic subjects (English, Math, Science, …) default **on**,
-   co-scholastic/discipline ones (Art Education, Work Education, Discipline, G.K., …) default
-   **off**. You can also add a subject by hand and tick "Lab" for anything needing two periods
-   back-to-back.
+3. **Class** — this is also where classes/sections themselves live: add one by hand (Class +
+   Section, e.g. "Grade 6" / "Ganges"), remove one with the × on its chip, or click a chip to
+   select it. Click as many chips as you like — the Subjects and Teachers sections below then
+   narrow down to just what the *selected* classes study (a union across all of them), instead of
+   the school's full lists. It's a display filter only: toggling a subject on/off there still
+   affects that subject everywhere it's used, not just the selected classes. Click "All classes" to
+   clear the selection and see everything again.
+4. **Subjects** — shows the subjects for whichever class(es) are selected above (or all of them).
+   Each has an **"In timetable"** toggle — scholastic subjects (English, Math, Science, …) default
+   **on**, co-scholastic/discipline ones (Art Education, Work Education, Discipline, G.K., …)
+   default **off**. You can also add a subject by hand and tick "Lab" for anything needing two
+   periods back-to-back.
 5. **Teachers** — same class filter as Subjects. Click "Unavailable slots" under a teacher to block
    off day/period combinations they can't teach, or cap their periods/day or /week.
-6. **Classes & Sections**, 7. **Avoid back-to-back**, 8. **Rooms**, 9. **Requirements** — all filled
-   in automatically by the import; open one only for a manual fix (a class the ERP doesn't have yet,
-   keeping two teachers apart, a shared room, or a different periods/week count for one subject in
-   the Requirements table).
+6. **Avoid back-to-back**, 7. **Rooms**, 8. **Requirements** — all filled in automatically by the
+   import; open one only for a manual fix (keeping two teachers apart, a shared room, or a
+   different periods/week count for one subject in the Requirements table).
 
 ### 2. Generate
 Click one button. It reads everything from Setup and builds a complete clash-free timetable — no teacher or room double-booked. Takes a few seconds.
