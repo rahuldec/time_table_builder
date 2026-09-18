@@ -86,10 +86,11 @@ section you're on.
    - **Periods/wk** — click into the number and change it. The import always starts everything at
      the same default, since the ERP doesn't carry a real per-subject count; this is where you
      correct it to what the subject actually needs.
-   - **Day** — defaults to "Any" (the generator picks freely, same as before). Set it to a specific
-     day to pin *every* period of that requirement to that day — e.g. Assembly always on Monday.
-     This is a hard rule: if it can't fit, that period shows up as unplaced rather than the day
-     being ignored.
+   - **Day** — a row of day letters (Mo Tu We Th Fr Sa). None selected = "Any" (the generator
+     picks freely, same as before). Tap one or more to pin every period of that requirement to
+     only those days — e.g. Assembly on Mon, or PE on Tue + Thu. This is a hard rule: if it can't
+     fit within the picked days, that period shows up as unplaced rather than spilling onto a day
+     you didn't select.
 
    **Known gap:** since there's no add-a-row form here any more, if the ERP is missing a
    class/subject/teacher *combination* entirely (not just the class, subject, or teacher

@@ -130,7 +130,7 @@ export function importAcademicMappings(
           teacher_id: teacherId,
           periods_per_week: defaultPeriodsPerWeek,
           is_lab: false,
-          day: null,
+          days: [],
         });
       }
     }

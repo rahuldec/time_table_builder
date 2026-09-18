@@ -45,7 +45,7 @@ export interface LessonRequirement {
   periodsPerWeek: number;
   roomId?: string; // required room (e.g. a specific lab) - omit for regular classroom subjects
   isLab?: boolean; // overrides subject.isLab if set
-  fixedDay?: string; // if set, every period of this requirement must land on this day (hard constraint)
+  fixedDays?: string[]; // if non-empty, every period of this requirement must land on one of these days (hard constraint)
 
   // ----- rule flags, copied from the subject at generation time -----
   avoidFirstPeriod?: boolean;   // never place this subject in the day's first teaching period

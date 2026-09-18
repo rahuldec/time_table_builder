@@ -49,7 +49,7 @@ interface Unit {
   avoidFirstPeriod: boolean;
   avoidLastPeriod: boolean;
   allowRepeatSameDay: boolean;
-  fixedDay?: string;
+  fixedDays?: string[];
 }
 
 function expandToUnits(lessons: LessonRequirement[]): Unit[] {
@@ -65,7 +65,7 @@ function expandToUnits(lessons: LessonRequirement[]): Unit[] {
       avoidFirstPeriod: !!lesson.avoidFirstPeriod,
       avoidLastPeriod: !!lesson.avoidLastPeriod,
       allowRepeatSameDay: !!lesson.allowRepeatSameDay,
-      fixedDay: lesson.fixedDay,
+      fixedDays: lesson.fixedDays,
     };
     let remaining = lesson.periodsPerWeek;
     if (isLab) {
@@ -151,10 +151,11 @@ function runOneAttempt(
     const teacher = teachers.get(unit.teacherId);
     const candidates: { day: string; period: number; score: number; violations: number }[] = [];
 
-    // A fixed day (a hard constraint, same strictness as teacher unavailability)
-    // restricts every period of this unit to that one day instead of any
-    // working day.
-    const candidateDays = unit.fixedDay ? [unit.fixedDay] : school.workingDays;
+    // Fixed days (a hard constraint, same strictness as teacher unavailability)
+    // restrict every period of this unit to one of these days instead of any
+    // working day. Empty/unset = no restriction (all working days).
+    const candidateDays =
+      unit.fixedDays && unit.fixedDays.length > 0 ? unit.fixedDays : school.workingDays;
     for (const day of candidateDays) {
       const maxPeriod = unit.isDouble ? school.periodsPerDay - 1 : school.periodsPerDay;
       for (let period = 1; period <= maxPeriod; period++) {

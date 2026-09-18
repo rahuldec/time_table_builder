@@ -48,7 +48,8 @@ interface LessonRequirementRow {
   id: string;
   periods_per_week: number;
   is_lab: boolean;
-  day: string | null; // if set, every period of this requirement must land on this day
+  days?: string[]; // if non-empty, every period of this requirement must land on one of these days
+  day?: string | null; // legacy single-day field, read as a fallback if `days` isn't present
   class_sections: { class_name: string; section_name: string } | null;
   subjects: { name: string } | null;
   teachers: { name: string } | null;
@@ -791,9 +792,9 @@ function LessonRequirementsCard({ schoolId }: { schoolId: string }) {
         <p className="text-sm text-gray-600">
           One row = "this class needs this subject, taught by this teacher, this many times a week."
           This is what gets turned into the actual timetable — populated by the Academic API
-          import. Edit "Periods/wk" directly, and optionally pin "Day" if a subject must always
-          land on a specific day (e.g. Assembly on Monday); leave it "Any" to let Generate pick
-          freely, same as before.
+          import. Edit "Periods/wk" directly, and optionally tap day letters under "Day" if a
+          subject must always land on specific days (e.g. Assembly on Mon, or PE on Tue + Thu);
+          leave none selected ("Any") to let Generate pick freely, same as before.
         </p>
       </div>
 
@@ -838,16 +839,50 @@ function LessonRequirementsCard({ schoolId }: { schoolId: string }) {
                     />
                   </td>
                   <td className="py-2 pr-4">
-                    <select
-                      className="input py-1"
-                      value={row.day ?? ""}
-                      onChange={(e) => update(row.id, { day: e.target.value || null })}
-                    >
-                      <option value="">Any</option>
-                      {ALL_DAYS.map((d) => (
-                        <option key={d} value={d}>{d}</option>
-                      ))}
-                    </select>
+                    {(() => {
+                      // Falls back to the old single-day field for any row
+                      // written before "days" existed.
+                      const selectedDays = row.days ?? (row.day ? [row.day] : []);
+                      // Reads the current value straight from localDb rather
+                      // than the (possibly stale) row prop above — clicking
+                      // two day-letters quickly both fire before this
+                      // component re-renders, so building the next array
+                      // from `selectedDays` would silently drop the first
+                      // click (same bug already fixed for the Class picker).
+                      const toggle = (d: string) => {
+                        const current = localDb.select("lesson_requirements", { id: row.id })[0];
+                        const currentDays =
+                          (current?.days as string[] | undefined) ??
+                          (current?.day ? [current.day as string] : []);
+                        update(row.id, {
+                          days: currentDays.includes(d)
+                            ? currentDays.filter((x) => x !== d)
+                            : [...currentDays, d],
+                        });
+                      };
+                      return (
+                        <div className="flex gap-1 flex-nowrap">
+                          {ALL_DAYS.map((d) => (
+                            <button
+                              key={d}
+                              type="button"
+                              title={d}
+                              onClick={() => toggle(d)}
+                              className={`w-7 h-7 shrink-0 rounded-full text-[10px] font-medium border transition-colors ${
+                                selectedDays.includes(d)
+                                  ? "bg-[var(--ink-teal)] text-white border-[var(--ink-teal)]"
+                                  : "border-gray-300 text-gray-500 hover:border-[var(--ink-teal)]"
+                              }`}
+                            >
+                              {d.slice(0, 2)}
+                            </button>
+                          ))}
+                          {selectedDays.length === 0 && (
+                            <span className="text-xs text-gray-400 self-center ml-1">Any</span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="py-2 text-right">
                     <button className="text-red-500 hover:underline text-xs" onClick={() => remove(row.id)}>Remove</button>
