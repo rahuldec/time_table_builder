@@ -211,8 +211,8 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
           Paste the entity ID below and it fetches automatically — pulling every class, section,
           subject and their assigned teachers from that entity's ERP. Safe to run again later (for
           this or a different entity) — it skips what's already here. New lesson requirements are
-          created with the periods/week below; open "Advanced" further down to edit an individual
-          count afterwards if a subject needs something different.
+          created with the periods/week below; open the "Requirements" section to edit an
+          individual count afterwards if a subject needs something different.
         </p>
       </div>
       <div className="flex gap-2 items-center flex-wrap">
@@ -245,7 +245,7 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
             <>
               {" "}
               {summary.multiTeacherSubjects} subject(s) had more than one teacher assigned — only
-              the first was imported; add the others manually under "Advanced" further down.
+              the first was imported; add the others manually in the "Requirements" section.
             </>
           )}
         </p>
@@ -821,13 +821,13 @@ export default function Setup() {
     loadSchool();
   }, []);
 
-  // Bumps dataRefreshKey, which remounts the scroller (key={dataRefreshKey}
-  // below) with fresh data and — since a fresh element always starts at
-  // scrollLeft 0 — lands back on the first panel automatically.
+  // Bumps dataRefreshKey, which remounts just the data-listing panels
+  // (Subjects, Classes, Teachers, ...) so they re-fetch and show what was
+  // just imported. The Import panel itself is deliberately NOT remounted —
+  // otherwise it would wipe its own success message and the entity ID
+  // field the instant the import finished, before you could ever see them.
   const handleImported = () => {
     setDataRefreshKey((k) => k + 1);
-    activeIndexRef.current = 0;
-    setActiveIndex(0);
   };
 
   const scrollToIndex = (i: number) => {
@@ -868,17 +868,38 @@ export default function Setup() {
     {
       id: "import",
       label: "Import",
+      remountOnImport: false,
       content: (
         <AcademicImportCard schoolId={school.id} onImported={handleImported} />
       ),
     },
-    { id: "school", label: "School settings", content: <SchoolSettings school={school} onSaved={loadSchool} /> },
-    { id: "subjects", label: "Subjects", content: <SubjectsCard schoolId={school.id} /> },
-    { id: "classes", label: "Classes", content: <ClassSectionsCard schoolId={school.id} refreshKey={0} /> },
-    { id: "teachers", label: "Teachers", content: <TeachersCard schoolId={school.id} /> },
-    { id: "pairs", label: "Avoid back-to-back", content: <AvoidAdjacentTeachersCard schoolId={school.id} /> },
-    { id: "rooms", label: "Rooms", content: <RoomsCard schoolId={school.id} /> },
-    { id: "requirements", label: "Requirements", content: <LessonRequirementsCard schoolId={school.id} /> },
+    {
+      id: "school",
+      label: "School settings",
+      remountOnImport: false,
+      content: <SchoolSettings school={school} onSaved={loadSchool} />,
+    },
+    { id: "subjects", label: "Subjects", remountOnImport: true, content: <SubjectsCard schoolId={school.id} /> },
+    {
+      id: "classes",
+      label: "Classes",
+      remountOnImport: true,
+      content: <ClassSectionsCard schoolId={school.id} refreshKey={0} />,
+    },
+    { id: "teachers", label: "Teachers", remountOnImport: true, content: <TeachersCard schoolId={school.id} /> },
+    {
+      id: "pairs",
+      label: "Avoid back-to-back",
+      remountOnImport: true,
+      content: <AvoidAdjacentTeachersCard schoolId={school.id} />,
+    },
+    { id: "rooms", label: "Rooms", remountOnImport: true, content: <RoomsCard schoolId={school.id} /> },
+    {
+      id: "requirements",
+      label: "Requirements",
+      remountOnImport: true,
+      content: <LessonRequirementsCard schoolId={school.id} />,
+    },
   ];
 
   return (
@@ -915,12 +936,16 @@ export default function Setup() {
         <div
           ref={scrollerRef}
           onScroll={handleScroll}
-          key={dataRefreshKey}
           className="flex overflow-x-auto snap-x snap-proximity scroll-smooth"
         >
           {sections.map((s) => (
             <div key={s.id} className="snap-start shrink-0 w-full px-1">
-              <div className="max-h-[65vh] overflow-y-auto pr-1">{s.content}</div>
+              <div
+                key={s.remountOnImport ? `${s.id}-${dataRefreshKey}` : s.id}
+                className="max-h-[65vh] overflow-y-auto pr-1"
+              >
+                {s.content}
+              </div>
             </div>
           ))}
         </div>

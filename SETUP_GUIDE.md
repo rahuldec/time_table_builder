@@ -52,14 +52,26 @@ or edit the same timetable. If that's ever needed, say so and we can add a share
 The app has 3 tabs at the top:
 
 ### 1. Setup
-The everyday path is three things, top to bottom — nothing gated behind an earlier step:
-1. **Import from Academic API (OD3)** (optional) — paste the **Entity ID** for the school you want and it fetches automatically (no button needed, though "Fetch & import" is there to re-run it). Pulls every class, section, subject, and assigned teacher straight from the school's ERP. Safe to run again later — for the same entity or a different one — it skips anything already imported.
-2. **School settings** — working days, periods per day, which periods are breaks. Defaults to Mon–Sat / 8 periods if you don't touch it; adjust and save whenever.
-3. **Subjects** — every imported subject shows here with an **"In timetable"** toggle. Scholastic subjects (English, Math, Science, …) default **on**. Co-scholastic and discipline periods (Art Education, Work Education, Discipline, G.K., …) default **off** — flip one on if you actually want it scheduled. You can also add a subject by hand here and tick "Lab" for anything needing two periods back-to-back.
+Setup is a horizontal strip of 8 sections — numbered pills at the top jump straight to any of
+them, and `‹ ›` arrows (or swiping/scrolling) step through one at a time. Nothing is gated behind
+an earlier step, and the **"Generate timetable →"** button stays visible underneath no matter which
+section you're on.
 
-Then hit the **"Generate timetable →"** button right there on Setup.
-
-Everything else — Classes & sections, Teachers, Rooms, keeping two teachers apart, and the raw "what each class needs to study" table (with per-entry periods/week) — lives under **"Advanced: edit classes, teachers, rooms & requirements manually"**, collapsed by default. The import fills all of it in automatically; open it only for manual fixes (a class the ERP doesn't have yet, a teacher's load cap, a different periods/week count for one subject, etc.).
+1. **Import** (optional) — paste the **Entity ID** for the school you want and it fetches
+   automatically (no button needed, though "Fetch & import" is there to re-run it). Pulls every
+   class, section, subject, and assigned teacher straight from the school's ERP. Safe to run again
+   later — for the same entity or a different one — it skips anything already imported.
+2. **School settings** — working days, periods per day, which periods are breaks. Defaults to
+   Mon–Sat / 8 periods if you don't touch it; adjust and save whenever.
+3. **Subjects** — every imported subject shows here with an **"In timetable"** toggle. Scholastic
+   subjects (English, Math, Science, …) default **on**. Co-scholastic and discipline periods (Art
+   Education, Work Education, Discipline, G.K., …) default **off** — flip one on if you actually
+   want it scheduled. You can also add a subject by hand here and tick "Lab" for anything needing
+   two periods back-to-back.
+4. **Classes**, 5. **Teachers**, 6. **Avoid back-to-back**, 7. **Rooms**, 8. **Requirements** — all
+   filled in automatically by the import; open one only for a manual fix (a class the ERP doesn't
+   have yet, a teacher's load cap, keeping two teachers apart, a shared room, or a different
+   periods/week count for one subject in the Requirements table).
 
 ### 2. Generate
 Click one button. It reads everything from Setup and builds a complete clash-free timetable — no teacher or room double-booked. Takes a few seconds.
