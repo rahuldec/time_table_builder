@@ -310,15 +310,84 @@ function ClassSectionsCard({ schoolId, refreshKey }: { schoolId: string; refresh
 }
 
 // =====================================================================
+// Class picker — lets you focus Subjects/Teachers on one class at a time
+// instead of the full school-wide lists. Purely a filter: toggling a
+// subject or teacher here still affects it everywhere it's used, not
+// just the selected class.
+// =====================================================================
+function ClassSelectorCard({
+  schoolId,
+  selectedClassId,
+  onSelect,
+}: {
+  schoolId: string;
+  selectedClassId: string;
+  onSelect: (id: string) => void;
+}) {
+  const { data, loading } = useTable<ClassSection>("class_sections", { school_id: schoolId });
+  const sorted = [...data].sort(
+    (a, b) =>
+      a.class_name.localeCompare(b.class_name, undefined, { numeric: true }) ||
+      a.section_name.localeCompare(b.section_name, undefined, { numeric: true })
+  );
+
+  return (
+    <div className="card space-y-4">
+      <div>
+        <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
+          Class
+        </h2>
+        <p className="text-sm text-gray-600">
+          Pick a class to make the Subjects and Teachers sections show just what that class
+          studies, instead of the school's full lists. Switch back to "All classes" any time.
+        </p>
+      </div>
+      {loading ? (
+        <p className="text-sm text-gray-500">Loading...</p>
+      ) : sorted.length === 0 ? (
+        <p className="text-sm text-gray-500">
+          No classes yet — import from the Academic API, or add one in the Classes & Sections
+          section.
+        </p>
+      ) : (
+        <select
+          className="input w-full sm:w-80"
+          value={selectedClassId}
+          onChange={(e) => onSelect(e.target.value)}
+        >
+          <option value="">All classes</option>
+          {sorted.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.class_name} — {c.section_name}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
 // Subjects
 // =====================================================================
-function SubjectsCard({ schoolId }: { schoolId: string }) {
+function SubjectsCard({ schoolId, classSectionId }: { schoolId: string; classSectionId?: string }) {
   const [name, setName] = useState("");
   const [isLab, setIsLab] = useState(false);
   const [avoidFirst, setAvoidFirst] = useState(false);
   const [avoidLast, setAvoidLast] = useState(false);
   const [allowRepeat, setAllowRepeat] = useState(false);
-  const { data, loading, add, remove, update } = useTable<Subject>("subjects", { school_id: schoolId });
+  const { data: allData, loading, add, remove, update } = useTable<Subject>("subjects", { school_id: schoolId });
+
+  // When a class is picked (section 3), only show subjects actually taught
+  // to that class — i.e. ones with a lesson requirement linking them.
+  const allowedSubjectIds = classSectionId
+    ? new Set(
+        localDb
+          .select("lesson_requirements", { school_id: schoolId, class_section_id: classSectionId })
+          .map((r) => r.subject_id)
+      )
+    : null;
+  const data = allowedSubjectIds ? allData.filter((s) => allowedSubjectIds.has(s.id)) : allData;
 
   const submit = async () => {
     if (!name.trim()) return;
@@ -377,11 +446,16 @@ function SubjectsCard({ schoolId }: { schoolId: string }) {
       {loading ? (
         <p className="text-sm text-gray-500">Loading...</p>
       ) : data.length === 0 ? (
-        <p className="text-sm text-gray-500">Nothing added yet.</p>
+        <p className="text-sm text-gray-500">
+          {classSectionId
+            ? "This class has no subjects yet — add them in the Requirements section, or pick \"All classes\" above to see the full list."
+            : "Nothing added yet."}
+        </p>
       ) : (
         <>
           <p className="text-xs text-gray-400">
-            {data.length} subject{data.length === 1 ? "" : "s"} · unchecked ones are skipped when
+            {data.length} subject{data.length === 1 ? "" : "s"}
+            {classSectionId ? " for this class" : ""} · unchecked ones are skipped when
             generating
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -487,11 +561,22 @@ function TeacherUnavailabilityEditor({ teacherId }: { teacherId: string }) {
 // =====================================================================
 // Teachers
 // =====================================================================
-function TeachersCard({ schoolId }: { schoolId: string }) {
+function TeachersCard({ schoolId, classSectionId }: { schoolId: string; classSectionId?: string }) {
   const [name, setName] = useState("");
   const [maxDay, setMaxDay] = useState("");
   const [maxWeek, setMaxWeek] = useState("");
-  const { data, loading, add, remove } = useTable<Teacher>("teachers", { school_id: schoolId });
+  const { data: allData, loading, add, remove } = useTable<Teacher>("teachers", { school_id: schoolId });
+
+  // Same class-based filter as Subjects: only teachers actually assigned to
+  // the picked class via a lesson requirement.
+  const allowedTeacherIds = classSectionId
+    ? new Set(
+        localDb
+          .select("lesson_requirements", { school_id: schoolId, class_section_id: classSectionId })
+          .map((r) => r.teacher_id)
+      )
+    : null;
+  const data = allowedTeacherIds ? allData.filter((t) => allowedTeacherIds.has(t.id)) : allData;
 
   const submit = async () => {
     if (!name.trim()) return;
@@ -525,10 +610,16 @@ function TeachersCard({ schoolId }: { schoolId: string }) {
       {loading ? (
         <p className="text-sm text-gray-500">Loading...</p>
       ) : data.length === 0 ? (
-        <p className="text-sm text-gray-500">Nothing added yet.</p>
+        <p className="text-sm text-gray-500">
+          {classSectionId
+            ? "No teacher is assigned to this class yet — add one in the Requirements section, or pick \"All classes\" above to see the full list."
+            : "Nothing added yet."}
+        </p>
       ) : (
         <>
-          <p className="text-xs text-gray-400">{data.length} teacher{data.length === 1 ? "" : "s"}</p>
+          <p className="text-xs text-gray-400">
+            {data.length} teacher{data.length === 1 ? "" : "s"}{classSectionId ? " for this class" : ""}
+          </p>
           <ul className="text-sm divide-y divide-gray-100">
             {[...data]
               .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
@@ -795,6 +886,7 @@ export default function Setup() {
   const [activeIndex, setActiveIndex] = useState(0);
   const activeIndexRef = useRef(0); // mirrors activeIndex without waiting for a re-render
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const [selectedClassId, setSelectedClassId] = useState(""); // "" = all classes
 
   // A school record always exists after this runs — there's no "save
   // school settings to unlock the rest" gate. If none exists yet (first
@@ -879,14 +971,32 @@ export default function Setup() {
       remountOnImport: false,
       content: <SchoolSettings school={school} onSaved={loadSchool} />,
     },
-    { id: "subjects", label: "Subjects", remountOnImport: true, content: <SubjectsCard schoolId={school.id} /> },
+    {
+      id: "class-picker",
+      label: "Class",
+      remountOnImport: true,
+      content: (
+        <ClassSelectorCard schoolId={school.id} selectedClassId={selectedClassId} onSelect={setSelectedClassId} />
+      ),
+    },
+    {
+      id: "subjects",
+      label: "Subjects",
+      remountOnImport: true,
+      content: <SubjectsCard schoolId={school.id} classSectionId={selectedClassId || undefined} />,
+    },
+    {
+      id: "teachers",
+      label: "Teachers",
+      remountOnImport: true,
+      content: <TeachersCard schoolId={school.id} classSectionId={selectedClassId || undefined} />,
+    },
     {
       id: "classes",
-      label: "Classes",
+      label: "Classes & Sections",
       remountOnImport: true,
       content: <ClassSectionsCard schoolId={school.id} refreshKey={0} />,
     },
-    { id: "teachers", label: "Teachers", remountOnImport: true, content: <TeachersCard schoolId={school.id} /> },
     {
       id: "pairs",
       label: "Avoid back-to-back",
