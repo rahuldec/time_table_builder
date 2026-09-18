@@ -282,15 +282,28 @@ function ClassSectionsCard({ schoolId, refreshKey }: { schoolId: string; refresh
         <input className="input" placeholder="Section (e.g. Ganges)" value={sectionName} onChange={(e) => setSectionName(e.target.value)} />
         <button className="btn-marigold" onClick={submit}>Add</button>
       </div>
-      {loading ? <p className="text-sm text-gray-500">Loading...</p> : (
-        <ul className="text-sm space-y-1">
-          {data.map((c) => (
-            <li key={c.id} className="flex justify-between border-b border-gray-100 py-1">
-              <span>{c.class_name} — {c.section_name}</span>
-              <button className="text-red-500 hover:underline text-xs" onClick={() => remove(c.id)}>Remove</button>
-            </li>
-          ))}
-        </ul>
+      {loading ? (
+        <p className="text-sm text-gray-500">Loading...</p>
+      ) : data.length === 0 ? (
+        <p className="text-sm text-gray-500">Nothing added yet.</p>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+          {[...data]
+            .sort(
+              (a, b) =>
+                a.class_name.localeCompare(b.class_name, undefined, { numeric: true }) ||
+                a.section_name.localeCompare(b.section_name, undefined, { numeric: true })
+            )
+            .map((c) => (
+              <div
+                key={c.id}
+                className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 px-3 py-1.5 text-sm"
+              >
+                <span className="truncate">{c.class_name} — {c.section_name}</span>
+                <button className="text-red-400 hover:text-red-600 text-xs shrink-0" title="Remove" onClick={() => remove(c.id)}>✕</button>
+              </div>
+            ))}
+        </div>
       )}
     </div>
   );
@@ -361,31 +374,60 @@ function SubjectsCard({ schoolId }: { schoolId: string }) {
       </div>
       <button className="btn-marigold" onClick={submit}>Add</button>
 
-      {loading ? <p className="text-sm text-gray-500">Loading...</p> : (
-        <ul className="text-sm space-y-1">
-          {data.map((s) => (
-            <li key={s.id} className="flex justify-between items-center border-b border-gray-100 py-1">
-              <span>
-                {s.name}{" "}
-                {s.is_lab && <span className="text-xs text-[var(--marigold-dark)]">(Lab)</span>}{" "}
-                {s.avoid_first_period && <span className="text-xs text-gray-400">· no 1st period</span>}{" "}
-                {s.avoid_last_period && <span className="text-xs text-gray-400">· no last period</span>}{" "}
-                {s.allow_repeat_same_day && <span className="text-xs text-gray-400">· repeats allowed</span>}
-              </span>
-              <span className="flex items-center gap-3 shrink-0">
-                <label className="flex items-center gap-1 text-xs text-gray-600">
-                  <input
-                    type="checkbox"
-                    checked={s.included !== false}
-                    onChange={(e) => update(s.id, { included: e.target.checked })}
-                  />
-                  In timetable
-                </label>
-                <button className="text-red-500 hover:underline text-xs" onClick={() => remove(s.id)}>Remove</button>
-              </span>
-            </li>
-          ))}
-        </ul>
+      {loading ? (
+        <p className="text-sm text-gray-500">Loading...</p>
+      ) : data.length === 0 ? (
+        <p className="text-sm text-gray-500">Nothing added yet.</p>
+      ) : (
+        <>
+          <p className="text-xs text-gray-400">
+            {data.length} subject{data.length === 1 ? "" : "s"} · unchecked ones are skipped when
+            generating
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {[...data]
+              .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+              .map((s) => {
+                const badges = [
+                  s.is_lab && "Lab",
+                  s.avoid_first_period && "no 1st",
+                  s.avoid_last_period && "no last",
+                  s.allow_repeat_same_day && "repeats",
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
+                const included = s.included !== false;
+                return (
+                  <div
+                    key={s.id}
+                    className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-sm ${
+                      included ? "border-gray-200" : "border-gray-100 bg-gray-50 text-gray-400"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate">{s.name}</div>
+                      {badges && <div className="text-xs text-gray-400 truncate">{badges}</div>}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <input
+                        type="checkbox"
+                        title="In timetable"
+                        checked={included}
+                        onChange={(e) => update(s.id, { included: e.target.checked })}
+                      />
+                      <button
+                        className="text-red-400 hover:text-red-600 text-xs"
+                        title="Remove"
+                        onClick={() => remove(s.id)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </>
       )}
     </div>
   );
@@ -480,18 +522,31 @@ function TeachersCard({ schoolId }: { schoolId: string }) {
         <input className="input w-36" placeholder="Max / week" value={maxWeek} onChange={(e) => setMaxWeek(e.target.value)} />
         <button className="btn-marigold" onClick={submit}>Add</button>
       </div>
-      {loading ? <p className="text-sm text-gray-500">Loading...</p> : (
-        <ul className="text-sm space-y-2">
-          {data.map((t) => (
-            <li key={t.id} className="border-b border-gray-100 py-1">
-              <div className="flex justify-between">
-                <span>{t.name} {t.max_periods_per_day ? `· max ${t.max_periods_per_day}/day` : ""} {t.max_periods_per_week ? `· max ${t.max_periods_per_week}/week` : ""}</span>
-                <button className="text-red-500 hover:underline text-xs" onClick={() => remove(t.id)}>Remove</button>
-              </div>
-              <TeacherUnavailabilityEditor teacherId={t.id} />
-            </li>
-          ))}
-        </ul>
+      {loading ? (
+        <p className="text-sm text-gray-500">Loading...</p>
+      ) : data.length === 0 ? (
+        <p className="text-sm text-gray-500">Nothing added yet.</p>
+      ) : (
+        <>
+          <p className="text-xs text-gray-400">{data.length} teacher{data.length === 1 ? "" : "s"}</p>
+          <ul className="text-sm divide-y divide-gray-100">
+            {[...data]
+              .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+              .map((t) => (
+                <li key={t.id} className="py-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate">
+                      {t.name}
+                      {t.max_periods_per_day ? ` · max ${t.max_periods_per_day}/day` : ""}
+                      {t.max_periods_per_week ? ` · max ${t.max_periods_per_week}/week` : ""}
+                    </span>
+                    <button className="text-red-400 hover:text-red-600 text-xs shrink-0" title="Remove" onClick={() => remove(t.id)}>✕</button>
+                  </div>
+                  <TeacherUnavailabilityEditor teacherId={t.id} />
+                </li>
+              ))}
+          </ul>
+        </>
       )}
     </div>
   );
