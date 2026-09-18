@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabase";
+import { localDb } from "../lib/localDb";
 import { useTable } from "../lib/useTable";
+import { fetchAllSubjectCourseMappings } from "../lib/academicApi";
+import { importAcademicMappings, type ImportSummary } from "../lib/academicImport";
 
 // ===== Types just for what this page reads/writes =====
 interface School {
@@ -82,9 +84,9 @@ function SchoolSettings({ school, onSaved }: { school: School | null; onSaved: (
       .filter((n) => !isNaN(n));
     const payload = { name, working_days: days, periods_per_day: periodsPerDay, blocked_periods: blocked };
     if (school) {
-      await supabase.from("schools").update(payload).eq("id", school.id);
+      localDb.update("schools", school.id, payload);
     } else {
-      await supabase.from("schools").insert(payload);
+      localDb.insert("schools", payload);
     }
     setSaving(false);
     onSaved();
@@ -148,12 +150,88 @@ function SchoolSettings({ school, onSaved }: { school: School | null; onSaved: (
 }
 
 // =====================================================================
+// Import from OD3 Academic API — pulls course/section/subject/teacher
+// mappings already set up in the school's ERP, so Setup doesn't need to be
+// re-typed by hand.
+// =====================================================================
+function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImported: () => void }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const [defaultPeriodsPerWeek, setDefaultPeriodsPerWeek] = useState("5");
+
+  const runImport = async () => {
+    setLoading(true);
+    setError(null);
+    setSummary(null);
+    try {
+      const mappings = await fetchAllSubjectCourseMappings();
+      const result = await importAcademicMappings(
+        schoolId,
+        mappings,
+        parseInt(defaultPeriodsPerWeek, 10) || 5
+      );
+      setSummary(result);
+      onImported();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="card space-y-4">
+      <div>
+        <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
+          Import from Academic API (OD3)
+        </h2>
+        <p className="text-sm text-gray-600">
+          Pulls classes, sections, subjects and their assigned teachers from the school's ERP and
+          adds anything not already here. Safe to run again later — it skips what's already
+          imported. New lesson requirements are created with the periods/week below; edit them in
+          section 7 afterwards if a subject needs a different count.
+        </p>
+      </div>
+      <div className="flex gap-2 items-center flex-wrap">
+        <label className="text-sm">Default periods/week for new subjects</label>
+        <input
+          type="number"
+          className="input w-24"
+          value={defaultPeriodsPerWeek}
+          onChange={(e) => setDefaultPeriodsPerWeek(e.target.value)}
+        />
+        <button className="btn-primary" onClick={runImport} disabled={loading}>
+          {loading ? "Importing..." : "Fetch & import"}
+        </button>
+      </div>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {summary && (
+        <p className="text-sm text-gray-700">
+          Added {summary.classSectionsAdded} class section(s), {summary.subjectsAdded} subject(s),{" "}
+          {summary.teachersAdded} teacher(s), {summary.lessonRequirementsAdded} lesson
+          requirement(s). Skipped {summary.lessonRequirementsSkipped} already-imported
+          requirement(s).
+          {summary.multiTeacherSubjects > 0 && (
+            <>
+              {" "}
+              {summary.multiTeacherSubjects} subject(s) had more than one teacher assigned — only
+              the first was imported; add the others manually in section 7.
+            </>
+          )}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
 // Class Sections
 // =====================================================================
 function ClassSectionsCard({ schoolId, refreshKey }: { schoolId: string; refreshKey: number }) {
   const [className, setClassName] = useState("");
   const [sectionName, setSectionName] = useState("");
-  const { data, loading, add, remove } = useTable<ClassSection>("class_sections", "*", { school_id: schoolId });
+  const { data, loading, add, remove } = useTable<ClassSection>("class_sections", { school_id: schoolId });
 
   const submit = async () => {
     if (!className.trim() || !sectionName.trim()) return;
@@ -198,7 +276,7 @@ function SubjectsCard({ schoolId }: { schoolId: string }) {
   const [avoidFirst, setAvoidFirst] = useState(false);
   const [avoidLast, setAvoidLast] = useState(false);
   const [allowRepeat, setAllowRepeat] = useState(false);
-  const { data, loading, add, remove } = useTable<Subject>("subjects", "*", { school_id: schoolId });
+  const { data, loading, add, remove } = useTable<Subject>("subjects", { school_id: schoolId });
 
   const submit = async () => {
     if (!name.trim()) return;
@@ -277,7 +355,6 @@ function SubjectsCard({ schoolId }: { schoolId: string }) {
 function TeacherUnavailabilityEditor({ teacherId }: { teacherId: string }) {
   const { data, loading, add, remove } = useTable<TeacherUnavailability>(
     "teacher_unavailability",
-    "*",
     { teacher_id: teacherId }
   );
   const [day, setDay] = useState(ALL_DAYS[0]);
@@ -330,7 +407,7 @@ function TeachersCard({ schoolId }: { schoolId: string }) {
   const [name, setName] = useState("");
   const [maxDay, setMaxDay] = useState("");
   const [maxWeek, setMaxWeek] = useState("");
-  const { data, loading, add, remove } = useTable<Teacher>("teachers", "*", { school_id: schoolId });
+  const { data, loading, add, remove } = useTable<Teacher>("teachers", { school_id: schoolId });
 
   const submit = async () => {
     if (!name.trim()) return;
@@ -382,11 +459,9 @@ function TeachersCard({ schoolId }: { schoolId: string }) {
 // Teachers that should never be back-to-back for the same class
 // =====================================================================
 function AvoidAdjacentTeachersCard({ schoolId }: { schoolId: string }) {
-  const { data: teachers } = useTable<Teacher>("teachers", "*", { school_id: schoolId });
-  const select = "id, teacher_a_id, teacher_b_id, teacher_a:teacher_a_id(name), teacher_b:teacher_b_id(name)";
+  const { data: teachers } = useTable<Teacher>("teachers", { school_id: schoolId });
   const { data, loading, remove, refresh } = useTable<AvoidAdjacentPairRow>(
     "avoid_adjacent_teacher_pairs",
-    select,
     { school_id: schoolId }
   );
 
@@ -395,16 +470,14 @@ function AvoidAdjacentTeachersCard({ schoolId }: { schoolId: string }) {
 
   const submit = async () => {
     if (!teacherAId || !teacherBId || teacherAId === teacherBId) return;
-    const { error } = await supabase.from("avoid_adjacent_teacher_pairs").insert({
+    localDb.insert("avoid_adjacent_teacher_pairs", {
       school_id: schoolId,
       teacher_a_id: teacherAId,
       teacher_b_id: teacherBId,
     });
-    if (!error) {
-      setTeacherAId("");
-      setTeacherBId("");
-      refresh();
-    }
+    setTeacherAId("");
+    setTeacherBId("");
+    refresh();
   };
 
   return (
@@ -455,7 +528,7 @@ function AvoidAdjacentTeachersCard({ schoolId }: { schoolId: string }) {
 function RoomsCard({ schoolId }: { schoolId: string }) {
   const [name, setName] = useState("");
   const [type, setType] = useState("regular");
-  const { data, loading, add, remove } = useTable<Room>("rooms", "*", { school_id: schoolId });
+  const { data, loading, add, remove } = useTable<Room>("rooms", { school_id: schoolId });
 
   const submit = async () => {
     if (!name.trim()) return;
@@ -500,15 +573,13 @@ function RoomsCard({ schoolId }: { schoolId: string }) {
 // N times a week". This is the data the generator actually reads.
 // =====================================================================
 function LessonRequirementsCard({ schoolId }: { schoolId: string }) {
-  const { data: sections } = useTable<ClassSection>("class_sections", "*", { school_id: schoolId });
-  const { data: subjects } = useTable<Subject>("subjects", "*", { school_id: schoolId });
-  const { data: teachers } = useTable<Teacher>("teachers", "*", { school_id: schoolId });
-  const { data: rooms } = useTable<Room>("rooms", "*", { school_id: schoolId });
+  const { data: sections } = useTable<ClassSection>("class_sections", { school_id: schoolId });
+  const { data: subjects } = useTable<Subject>("subjects", { school_id: schoolId });
+  const { data: teachers } = useTable<Teacher>("teachers", { school_id: schoolId });
+  const { data: rooms } = useTable<Room>("rooms", { school_id: schoolId });
 
-  const select = "id, periods_per_week, is_lab, class_sections(class_name,section_name), subjects(name), teachers(name), rooms(name)";
   const { data, loading, remove, refresh } = useTable<LessonRequirementRow>(
     "lesson_requirements",
-    select,
     { school_id: schoolId }
   );
 
@@ -521,7 +592,7 @@ function LessonRequirementsCard({ schoolId }: { schoolId: string }) {
 
   const submit = async () => {
     if (!classSectionId || !subjectId || !teacherId || !periodsPerWeek) return;
-    const { error } = await supabase.from("lesson_requirements").insert({
+    localDb.insert("lesson_requirements", {
       school_id: schoolId,
       class_section_id: classSectionId,
       subject_id: subjectId,
@@ -530,10 +601,8 @@ function LessonRequirementsCard({ schoolId }: { schoolId: string }) {
       periods_per_week: parseInt(periodsPerWeek, 10),
       is_lab: isLab,
     });
-    if (!error) {
-      setClassSectionId(""); setSubjectId(""); setTeacherId(""); setRoomId(""); setPeriodsPerWeek("5"); setIsLab(false);
-      refresh();
-    }
+    setClassSectionId(""); setSubjectId(""); setTeacherId(""); setRoomId(""); setPeriodsPerWeek("5"); setIsLab(false);
+    refresh();
   };
 
   return (
@@ -625,11 +694,12 @@ function LessonRequirementsCard({ schoolId }: { schoolId: string }) {
 export default function Setup() {
   const [school, setSchool] = useState<School | null>(null);
   const [loadingSchool, setLoadingSchool] = useState(true);
+  const [dataRefreshKey, setDataRefreshKey] = useState(0);
 
   const loadSchool = async () => {
     setLoadingSchool(true);
-    const { data } = await supabase.from("schools").select("*").limit(1).maybeSingle();
-    setSchool((data as School) ?? null);
+    const rows = localDb.select("schools");
+    setSchool((rows[0] as unknown as School) ?? null);
     setLoadingSchool(false);
   };
 
@@ -644,12 +714,18 @@ export default function Setup() {
       <SchoolSettings school={school} onSaved={loadSchool} />
       {school && (
         <>
-          <ClassSectionsCard schoolId={school.id} refreshKey={0} />
-          <SubjectsCard schoolId={school.id} />
-          <TeachersCard schoolId={school.id} />
-          <AvoidAdjacentTeachersCard schoolId={school.id} />
-          <RoomsCard schoolId={school.id} />
-          <LessonRequirementsCard schoolId={school.id} />
+          <AcademicImportCard
+            schoolId={school.id}
+            onImported={() => setDataRefreshKey((k) => k + 1)}
+          />
+          <div key={dataRefreshKey} className="space-y-6">
+            <ClassSectionsCard schoolId={school.id} refreshKey={0} />
+            <SubjectsCard schoolId={school.id} />
+            <TeachersCard schoolId={school.id} />
+            <AvoidAdjacentTeachersCard schoolId={school.id} />
+            <RoomsCard schoolId={school.id} />
+            <LessonRequirementsCard schoolId={school.id} />
+          </div>
         </>
       )}
       {!school && (

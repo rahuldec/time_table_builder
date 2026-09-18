@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabase";
+import { localDb } from "../lib/localDb";
 
 interface School {
   id: string;
@@ -34,16 +34,16 @@ export default function Timetable() {
   // load school + the list of classes/teachers/rooms to choose from
   useEffect(() => {
     (async () => {
-      const { data: schoolRow } = await supabase.from("schools").select("*").limit(1).maybeSingle();
+      const schoolRow = localDb.select("schools")[0];
       if (!schoolRow) return;
-      setSchool(schoolRow as School);
+      setSchool(schoolRow as unknown as School);
 
       const table = mode === "class" ? "class_sections" : mode === "teacher" ? "teachers" : "rooms";
-      const { data } = await supabase.from(table).select("*").eq("school_id", schoolRow.id);
-      const opts: Option[] = (data ?? []).map((row: any) =>
+      const rows = localDb.select(table, { school_id: schoolRow.id });
+      const opts: Option[] = rows.map((row) =>
         mode === "class"
           ? { id: row.id, label: `${row.class_name} - ${row.section_name}` }
-          : { id: row.id, label: row.name }
+          : { id: row.id, label: row.name as string }
       );
       setOptions(opts);
       setSelectedId(opts[0]?.id ?? "");
@@ -57,15 +57,9 @@ export default function Timetable() {
       setLoading(true);
       setNoData(false);
 
-      const { data: maxVersionRow } = await supabase
-        .from("timetable_entries")
-        .select("version")
-        .eq("school_id", school.id)
-        .order("version", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const maxVersion = localDb.maxValue("timetable_entries", "version", { school_id: school.id });
 
-      if (!maxVersionRow) {
+      if (maxVersion === 0) {
         setEntries([]);
         setNoData(true);
         setLoading(false);
@@ -73,14 +67,11 @@ export default function Timetable() {
       }
 
       const filterCol = mode === "class" ? "class_section_id" : mode === "teacher" ? "teacher_id" : "room_id";
-      const { data, error } = await supabase
-        .from("timetable_entries")
-        .select("day, period, subjects(name), teachers(name), class_sections(class_name,section_name), rooms(name)")
-        .eq("school_id", school.id)
-        .eq("version", maxVersionRow.version)
-        .eq(filterCol, selectedId);
+      const rows = localDb
+        .select("timetable_entries", { school_id: school.id, version: String(maxVersion) })
+        .filter((r) => r[filterCol] === selectedId);
 
-      if (!error) setEntries((data as unknown as EntryRow[]) ?? []);
+      setEntries(rows as unknown as EntryRow[]);
       setLoading(false);
     })();
   }, [school, selectedId, mode]);

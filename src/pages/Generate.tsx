@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { supabase } from "../lib/supabase";
+import { localDb } from "../lib/localDb";
 import { generateTimetable } from "../lib/generator";
 import type { SchoolConfig, Teacher, LessonRequirement, TeacherPair } from "../lib/types";
 
@@ -18,28 +18,16 @@ export default function Generate() {
     setStatus({ kind: "working", message: "Reading school setup..." });
     try {
       // 1. Load the school
-      const { data: school, error: schoolErr } = await supabase
-        .from("schools")
-        .select("*")
-        .limit(1)
-        .maybeSingle();
-      if (schoolErr || !school) throw new Error("No school found. Finish the Setup page first.");
+      const school = localDb.select("schools")[0];
+      if (!school) throw new Error("No school found. Finish the Setup page first.");
 
       // 2. Load teachers (+ unavailability)
-      const { data: teacherRows, error: teacherErr } = await supabase
-        .from("teachers")
-        .select("*, teacher_unavailability(day, period)")
-        .eq("school_id", school.id);
-      if (teacherErr) throw new Error(teacherErr.message);
+      const teacherRows = localDb.select("teachers", { school_id: school.id as string });
 
       // 3. Load subjects (for the rule flags: avoid first/last period, allow repeat same day)
-      const { data: subjectRows, error: subjectErr } = await supabase
-        .from("subjects")
-        .select("id, avoid_first_period, avoid_last_period, allow_repeat_same_day")
-        .eq("school_id", school.id);
-      if (subjectErr) throw new Error(subjectErr.message);
+      const subjectRows = localDb.select("subjects", { school_id: school.id as string });
       const subjectMap = new Map(
-        (subjectRows ?? []).map((s) => [
+        subjectRows.map((s) => [
           s.id,
           {
             avoidFirstPeriod: !!s.avoid_first_period,
@@ -50,56 +38,48 @@ export default function Generate() {
       );
 
       // 4. Load lesson requirements
-      const { data: lessonRows, error: lessonErr } = await supabase
-        .from("lesson_requirements")
-        .select("*")
-        .eq("school_id", school.id);
-      if (lessonErr) throw new Error(lessonErr.message);
+      const lessonRows = localDb.select("lesson_requirements", { school_id: school.id as string });
 
-      if (!lessonRows || lessonRows.length === 0) {
+      if (lessonRows.length === 0) {
         throw new Error("No lesson requirements found. Add them on the Setup page first.");
       }
 
       // 5. Load teacher pairs that should never be back-to-back for the same class
-      const { data: pairRows, error: pairErr } = await supabase
-        .from("avoid_adjacent_teacher_pairs")
-        .select("teacher_a_id, teacher_b_id")
-        .eq("school_id", school.id);
-      if (pairErr) throw new Error(pairErr.message);
-      const avoidAdjacentTeacherPairs: TeacherPair[] = (pairRows ?? []).map((p) => ({
-        teacherAId: p.teacher_a_id,
-        teacherBId: p.teacher_b_id,
+      const pairRows = localDb.select("avoid_adjacent_teacher_pairs", { school_id: school.id as string });
+      const avoidAdjacentTeacherPairs: TeacherPair[] = pairRows.map((p) => ({
+        teacherAId: p.teacher_a_id as string,
+        teacherBId: p.teacher_b_id as string,
       }));
 
       setStatus({ kind: "working", message: "Building the timetable (this can take a few seconds)..." });
 
       const schoolConfig: SchoolConfig = {
-        workingDays: school.working_days,
-        periodsPerDay: school.periods_per_day,
-        blockedPeriods: school.blocked_periods ?? [],
+        workingDays: school.working_days as string[],
+        periodsPerDay: school.periods_per_day as number,
+        blockedPeriods: (school.blocked_periods as number[] | undefined) ?? [],
       };
 
-      const teachers: Teacher[] = (teacherRows ?? []).map((t) => ({
+      const teachers: Teacher[] = teacherRows.map((t) => ({
         id: t.id,
-        name: t.name,
-        maxPeriodsPerDay: t.max_periods_per_day ?? undefined,
-        maxPeriodsPerWeek: t.max_periods_per_week ?? undefined,
-        unavailable: (t.teacher_unavailability ?? []).map((u: { day: string; period: number }) => ({
-          day: u.day,
-          period: u.period,
+        name: t.name as string,
+        maxPeriodsPerDay: (t.max_periods_per_day as number | null) ?? undefined,
+        maxPeriodsPerWeek: (t.max_periods_per_week as number | null) ?? undefined,
+        unavailable: localDb.select("teacher_unavailability", { teacher_id: t.id }).map((u) => ({
+          day: u.day as string,
+          period: u.period as number,
         })),
       }));
 
-      const lessons: LessonRequirement[] = (lessonRows ?? []).map((l) => {
-        const subjFlags = subjectMap.get(l.subject_id);
+      const lessons: LessonRequirement[] = lessonRows.map((l) => {
+        const subjFlags = subjectMap.get(l.subject_id as string);
         return {
           id: l.id,
-          classSectionId: l.class_section_id,
-          subjectId: l.subject_id,
-          teacherId: l.teacher_id,
-          periodsPerWeek: l.periods_per_week,
-          roomId: l.room_id ?? undefined,
-          isLab: l.is_lab,
+          classSectionId: l.class_section_id as string,
+          subjectId: l.subject_id as string,
+          teacherId: l.teacher_id as string,
+          periodsPerWeek: l.periods_per_week as number,
+          roomId: (l.room_id as string | null) ?? undefined,
+          isLab: l.is_lab as boolean,
           avoidFirstPeriod: subjFlags?.avoidFirstPeriod ?? false,
           avoidLastPeriod: subjFlags?.avoidLastPeriod ?? false,
           allowRepeatSameDay: subjFlags?.allowRepeatSameDay ?? false,
@@ -118,14 +98,8 @@ export default function Generate() {
       setStatus({ kind: "working", message: "Saving the timetable..." });
 
       // 6. Work out the next version number, so old timetables aren't lost
-      const { data: maxVersionRow } = await supabase
-        .from("timetable_entries")
-        .select("version")
-        .eq("school_id", school.id)
-        .order("version", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      const nextVersion = (maxVersionRow?.version ?? 0) + 1;
+      const nextVersion =
+        localDb.maxValue("timetable_entries", "version", { school_id: school.id as string }) + 1;
 
       const rowsToInsert = result.entries.map((e) => ({
         school_id: school.id,
@@ -138,8 +112,7 @@ export default function Generate() {
         version: nextVersion,
       }));
 
-      const { error: insertErr } = await supabase.from("timetable_entries").insert(rowsToInsert);
-      if (insertErr) throw new Error(insertErr.message);
+      localDb.insert("timetable_entries", rowsToInsert);
 
       let message: string;
       if (result.unplaced.length > 0) {
