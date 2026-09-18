@@ -501,8 +501,8 @@ function SubjectsCard({ schoolId, classSectionIds }: { schoolId: string; classSe
 // =====================================================================
 // Teacher unavailability — nested under each teacher (collapsible)
 // =====================================================================
-function TeacherUnavailabilityEditor({ teacherId }: { teacherId: string }) {
-  const { data, loading, add, remove } = useTable<TeacherUnavailability>(
+function TeacherUnavailabilityEditor({ schoolId, teacherId }: { schoolId: string; teacherId: string }) {
+  const { data, loading, add, remove, refresh } = useTable<TeacherUnavailability>(
     "teacher_unavailability",
     { teacher_id: teacherId }
   );
@@ -515,6 +515,27 @@ function TeacherUnavailabilityEditor({ teacherId }: { teacherId: string }) {
     await add({ teacher_id: teacherId, day, period: p });
     setPeriod("");
   };
+
+  // Blocks every period of the selected day in one go — for staff who are
+  // off that day entirely, instead of adding each period one at a time.
+  const markDayOff = () => {
+    const school = localDb.select("schools", { id: schoolId })[0];
+    const periodsPerDay = (school?.periods_per_day as number | undefined) ?? 8;
+    const alreadyBlocked = new Set(data.filter((u) => u.day === day).map((u) => u.period));
+    const rows = [];
+    for (let p = 1; p <= periodsPerDay; p++) {
+      if (!alreadyBlocked.has(p)) rows.push({ teacher_id: teacherId, day, period: p });
+    }
+    if (rows.length > 0) localDb.insert("teacher_unavailability", rows);
+    refresh();
+  };
+
+  const dayFullyBlocked = (() => {
+    const school = localDb.select("schools", { id: schoolId })[0];
+    const periodsPerDay = (school?.periods_per_day as number | undefined) ?? 8;
+    const blockedForDay = data.filter((u) => u.day === day).length;
+    return blockedForDay >= periodsPerDay;
+  })();
 
   return (
     <details className="mt-1 ml-4">
@@ -534,6 +555,14 @@ function TeacherUnavailabilityEditor({ teacherId }: { teacherId: string }) {
           onChange={(e) => setPeriod(e.target.value)}
         />
         <button className="btn-marigold text-xs py-1 px-2" onClick={submit}>Add</button>
+        <button
+          className="text-xs py-1 px-2 rounded-md border border-gray-300 text-gray-600 hover:border-[var(--ink-teal)] disabled:opacity-50"
+          onClick={markDayOff}
+          disabled={dayFullyBlocked}
+          title={`Block every period on ${day}`}
+        >
+          {dayFullyBlocked ? `${day} fully off` : `Mark all of ${day} off`}
+        </button>
       </div>
       {!loading && data.length > 0 && (
         <ul className="mt-1 text-xs space-y-0.5">
@@ -626,7 +655,7 @@ function TeachersCard({ schoolId, classSectionIds }: { schoolId: string; classSe
                     </span>
                     <button className="text-red-400 hover:text-red-600 text-xs shrink-0" title="Remove" onClick={() => remove(t.id)}>✕</button>
                   </div>
-                  <TeacherUnavailabilityEditor teacherId={t.id} />
+                  <TeacherUnavailabilityEditor schoolId={schoolId} teacherId={t.id} />
                 </li>
               ))}
           </ul>
