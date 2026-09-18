@@ -156,17 +156,17 @@ function SchoolSettings({ school, onSaved }: { school: School | null; onSaved: (
 // mappings already set up in the school's ERP, so Setup doesn't need to be
 // re-typed by hand.
 // =====================================================================
+// New lesson requirements created by an import all start at this many
+// periods/week — the ERP data doesn't carry a count, so it's just a
+// reasonable starting point. Adjust individual ones in "Requirements".
+const DEFAULT_PERIODS_PER_WEEK = 5;
+
 function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImported: () => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [entityId, setEntityId] = useState(DEFAULT_ENTITY_ID);
-  const [defaultPeriodsPerWeek, setDefaultPeriodsPerWeek] = useState("5");
   const lastFetchedRef = useRef<string | null>(null);
-  const periodsRef = useRef(defaultPeriodsPerWeek);
-  useEffect(() => {
-    periodsRef.current = defaultPeriodsPerWeek;
-  }, [defaultPeriodsPerWeek]);
 
   const runImport = async (idOverride?: string) => {
     const id = (idOverride ?? entityId).trim();
@@ -176,11 +176,7 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
     setSummary(null);
     try {
       const mappings = await fetchAllSubjectCourseMappings(id);
-      const result = await importAcademicMappings(
-        schoolId,
-        mappings,
-        parseInt(periodsRef.current, 10) || 5
-      );
+      const result = await importAcademicMappings(schoolId, mappings, DEFAULT_PERIODS_PER_WEEK);
       setSummary(result);
       lastFetchedRef.current = id;
       onImported();
@@ -210,9 +206,9 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
         <p className="text-sm text-gray-600">
           Paste the entity ID below and it fetches automatically — pulling every class, section,
           subject and their assigned teachers from that entity's ERP. Safe to run again later (for
-          this or a different entity) — it skips what's already here. New lesson requirements are
-          created with the periods/week below; open the "Requirements" section to edit an
-          individual count afterwards if a subject needs something different.
+          this or a different entity) — it skips what's already here. New lesson requirements
+          start at {DEFAULT_PERIODS_PER_WEEK} periods/week; open the "Requirements" section to
+          edit an individual count afterwards if a subject needs something different.
         </p>
       </div>
       <div className="flex gap-2 items-center flex-wrap">
@@ -222,13 +218,6 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
           placeholder="e.g. 63edbf8a79c11c4fac7d760b"
           value={entityId}
           onChange={(e) => setEntityId(e.target.value)}
-        />
-        <label className="text-sm">Default periods/week for new subjects</label>
-        <input
-          type="number"
-          className="input w-24"
-          value={defaultPeriodsPerWeek}
-          onChange={(e) => setDefaultPeriodsPerWeek(e.target.value)}
         />
         <button className="btn-primary" onClick={() => runImport()} disabled={loading || !entityId.trim()}>
           {loading ? "Importing..." : "Fetch & import"}
