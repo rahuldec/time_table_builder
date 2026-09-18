@@ -37,9 +37,9 @@ or edit the same timetable. If that's ever needed, say so and we can add a share
 1. Go to [vercel.com](https://vercel.com) → **Add New → Project** → import the GitHub repo you just created.
 2. If you want the Academic API (OD3) import feature on the Setup page to work, open **Environment Variables** before deploying and add:
    - `VITE_ACADEMIC_API_BASE_URL` = `https://academic-api.odpay.in`
-   - `VITE_ACADEMIC_API_TOKEN` = the school's OD3 API token
-   - `VITE_ACADEMIC_ENTITY_ID` = the school's entity id
+   - `VITE_ACADEMIC_API_TOKEN` = the OD3 API token (this one token can pull multiple entities/schools)
    - `VITE_ACADEMIC_SESSION` = the academic session, e.g. `2026-27`
+   - `VITE_ACADEMIC_ENTITY_ID` (optional) = pre-fills the Entity ID field on Setup; you can still type a different entity id there per import — see the "multiple entities" note below.
    - (See `.env.example` for the same list.) Skip this if you're happy entering classes/subjects/teachers by hand instead.
 3. Click **Deploy**.
 4. Once it's live, you can connect your GoDaddy domain the same way you did for createassignment.in (Vercel → Project → Domains).
@@ -53,7 +53,7 @@ The app has 3 tabs at the top:
 ### 1. Setup
 This is where you enter everything about your school, in order:
 - **School settings** — working days, periods per day, which periods are breaks. Save this first.
-- **Import from Academic API (OD3)** (optional) — pulls classes, sections, subjects, and their assigned teachers straight from the school's ERP, so you don't have to re-type them. Safe to run again later; it skips anything already imported.
+- **Import from Academic API (OD3)** (optional) — pulls classes, sections, subjects, and their assigned teachers straight from the school's ERP, so you don't have to re-type them. Type the **Entity ID** for the school you're pulling (this is what makes the feature work across multiple schools from one deployment — different entity id, different school's data). Safe to run again later; it skips anything already imported.
 - **Classes & sections** — e.g. Grade 6 - Ganges, Grade 7 - Yamuna, etc.
 - **Subjects** — Math, Science, etc. Tick "Lab" for anything that needs two periods back-to-back (Computer, Science Lab).
 - **Teachers** — names, and optionally a cap on how many periods/day or /week they can teach.

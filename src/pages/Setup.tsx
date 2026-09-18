@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { localDb } from "../lib/localDb";
 import { useTable } from "../lib/useTable";
-import { fetchAllSubjectCourseMappings } from "../lib/academicApi";
+import { fetchAllSubjectCourseMappings, DEFAULT_ENTITY_ID } from "../lib/academicApi";
 import { importAcademicMappings, type ImportSummary } from "../lib/academicImport";
 
 // ===== Types just for what this page reads/writes =====
@@ -158,6 +158,7 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const [entityId, setEntityId] = useState(DEFAULT_ENTITY_ID);
   const [defaultPeriodsPerWeek, setDefaultPeriodsPerWeek] = useState("5");
 
   const runImport = async () => {
@@ -165,7 +166,7 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
     setError(null);
     setSummary(null);
     try {
-      const mappings = await fetchAllSubjectCourseMappings();
+      const mappings = await fetchAllSubjectCourseMappings(entityId);
       const result = await importAcademicMappings(
         schoolId,
         mappings,
@@ -187,13 +188,20 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
           Import from Academic API (OD3)
         </h2>
         <p className="text-sm text-gray-600">
-          Pulls classes, sections, subjects and their assigned teachers from the school's ERP and
+          Pulls classes, sections, subjects and their assigned teachers from the entity's ERP and
           adds anything not already here. Safe to run again later — it skips what's already
           imported. New lesson requirements are created with the periods/week below; edit them in
           section 7 afterwards if a subject needs a different count.
         </p>
       </div>
       <div className="flex gap-2 items-center flex-wrap">
+        <label className="text-sm">Entity ID</label>
+        <input
+          className="input w-64"
+          placeholder="e.g. 63edbf8a79c11c4fac7d760b"
+          value={entityId}
+          onChange={(e) => setEntityId(e.target.value)}
+        />
         <label className="text-sm">Default periods/week for new subjects</label>
         <input
           type="number"
@@ -201,7 +209,7 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
           value={defaultPeriodsPerWeek}
           onChange={(e) => setDefaultPeriodsPerWeek(e.target.value)}
         />
-        <button className="btn-primary" onClick={runImport} disabled={loading}>
+        <button className="btn-primary" onClick={runImport} disabled={loading || !entityId.trim()}>
           {loading ? "Importing..." : "Fetch & import"}
         </button>
       </div>
