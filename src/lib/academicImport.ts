@@ -7,7 +7,6 @@ export interface ImportSummary {
   teachersAdded: number;
   lessonRequirementsAdded: number;
   lessonRequirementsSkipped: number; // already existed, left untouched
-  multiTeacherSubjects: number; // subjects with >1 teacher — only the first was used
 }
 
 function sectionName(row: AcademicCourseMapping): string {
@@ -55,7 +54,6 @@ export function importAcademicMappings(
   const classSectionNames = new Map<string, Record<string, unknown>>();
   const subjectNames = new Map<string, Record<string, unknown>>();
   const teacherNames = new Map<string, Record<string, unknown>>();
-  let multiTeacherSubjects = 0;
 
   for (const row of mappings) {
     const csKey = `${row.course}::${sectionName(row)}`;
@@ -72,9 +70,12 @@ export function importAcademicMappings(
           included: subject.assessmentModel === "scholastic",
         });
       }
-      if (subject.employees.length > 1) multiTeacherSubjects++;
-      const teacher = subject.employees[0];
-      if (teacher) teacherNames.set(teacher.employeeName, { name: teacher.employeeName });
+      // A subject can have more than one teacher assigned for the same
+      // class (e.g. theory + practical, or a co-taught session) — import
+      // every one of them, not just the first.
+      for (const teacher of subject.employees) {
+        teacherNames.set(teacher.employeeName, { name: teacher.employeeName });
+      }
     }
   }
 
@@ -104,28 +105,34 @@ export function importAcademicMappings(
 
     for (const subject of row.subjects) {
       const subjectId = subjects.idByKey.get(subject.name);
-      const teacher = subject.employees[0];
-      if (!subjectId || !teacher) continue;
-      const teacherId = teachers.idByKey.get(teacher.employeeName);
-      if (!teacherId) continue;
+      if (!subjectId) continue;
 
-      const key = `${classSectionId}::${subjectId}::${teacherId}`;
-      if (seenThisImport.has(key)) continue;
-      seenThisImport.add(key);
+      // One requirement row per teacher assigned to this subject for this
+      // class — a subject with two teachers (theory + practical, say)
+      // becomes two rows, not one.
+      for (const teacher of subject.employees) {
+        const teacherId = teachers.idByKey.get(teacher.employeeName);
+        if (!teacherId) continue;
 
-      if (existingReqKeys.has(key)) {
-        skipped++;
-        continue;
+        const key = `${classSectionId}::${subjectId}::${teacherId}`;
+        if (seenThisImport.has(key)) continue;
+        seenThisImport.add(key);
+
+        if (existingReqKeys.has(key)) {
+          skipped++;
+          continue;
+        }
+
+        newRequirements.push({
+          school_id: schoolId,
+          class_section_id: classSectionId,
+          subject_id: subjectId,
+          teacher_id: teacherId,
+          periods_per_week: defaultPeriodsPerWeek,
+          is_lab: false,
+          day: null,
+        });
       }
-
-      newRequirements.push({
-        school_id: schoolId,
-        class_section_id: classSectionId,
-        subject_id: subjectId,
-        teacher_id: teacherId,
-        periods_per_week: defaultPeriodsPerWeek,
-        is_lab: false,
-      });
     }
   }
 
@@ -139,6 +146,5 @@ export function importAcademicMappings(
     teachersAdded: teachers.addedCount,
     lessonRequirementsAdded: newRequirements.length,
     lessonRequirementsSkipped: skipped,
-    multiTeacherSubjects,
   };
 }

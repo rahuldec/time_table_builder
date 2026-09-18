@@ -59,8 +59,10 @@ section you're on.
 
 1. **Import** (optional) — paste the **Entity ID** for the school you want and it fetches
    automatically (no button needed, though "Fetch & import" is there to re-run it). Pulls every
-   class, section, subject, and assigned teacher straight from the school's ERP. Safe to run again
-   later — for the same entity or a different one — it skips anything already imported.
+   class, section, subject, and assigned teacher straight from the school's ERP — including every
+   teacher on a subject that has more than one (theory + practical, co-taught, etc.), each becoming
+   its own row in Requirements. Safe to run again later — for the same entity or a different one —
+   it skips anything already imported.
 2. **School settings** — working days, periods per day, which periods are breaks. Defaults to
    Mon–Sat / 8 periods if you don't touch it; adjust and save whenever.
 3. **Class** — this is also where classes/sections themselves live: add one by hand (Class +
@@ -78,8 +80,22 @@ section you're on.
 5. **Teachers** — same class filter as Subjects. Click "Unavailable slots" under a teacher to block
    off day/period combinations they can't teach, or cap their periods/day or /week.
 6. **Avoid back-to-back**, 7. **Rooms**, 8. **Requirements** — all filled in automatically by the
-   import; open one only for a manual fix (keeping two teachers apart, a shared room, or a
-   different periods/week count for one subject in the Requirements table).
+   import. **Requirements** is now purely a review/edit table (there's no manual "add a row" form
+   any more — the ERP is treated as the source of truth for *what* gets taught) — but two things
+   are directly editable right there per row:
+   - **Periods/wk** — click into the number and change it. The import always starts everything at
+     the same default, since the ERP doesn't carry a real per-subject count; this is where you
+     correct it to what the subject actually needs.
+   - **Day** — defaults to "Any" (the generator picks freely, same as before). Set it to a specific
+     day to pin *every* period of that requirement to that day — e.g. Assembly always on Monday.
+     This is a hard rule: if it can't fit, that period shows up as unplaced rather than the day
+     being ignored.
+
+   **Known gap:** since there's no add-a-row form here any more, if the ERP is missing a
+   class/subject/teacher *combination* entirely (not just the class, subject, or teacher
+   individually — those can still be added in their own sections), there's currently no way to
+   create that specific requirement by hand. It has to come from the ERP via Import. Say so if this
+   becomes a real problem and we'll add a narrower "add one row" option back.
 
 ### 2. Generate
 Click one button. It reads everything from Setup and builds a complete clash-free timetable — no teacher or room double-booked. Takes a few seconds.

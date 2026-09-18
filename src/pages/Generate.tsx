@@ -89,6 +89,7 @@ export default function Generate() {
           avoidFirstPeriod: subjFlags?.avoidFirstPeriod ?? false,
           avoidLastPeriod: subjFlags?.avoidLastPeriod ?? false,
           allowRepeatSameDay: subjFlags?.allowRepeatSameDay ?? false,
+          fixedDay: (l.day as string | null) ?? undefined,
         };
       });
 

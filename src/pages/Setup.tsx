@@ -48,6 +48,7 @@ interface LessonRequirementRow {
   id: string;
   periods_per_week: number;
   is_lab: boolean;
+  day: string | null; // if set, every period of this requirement must land on this day
   class_sections: { class_name: string; section_name: string } | null;
   subjects: { name: string } | null;
   teachers: { name: string } | null;
@@ -223,13 +224,6 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
           {summary.teachersAdded} teacher(s), {summary.lessonRequirementsAdded} lesson
           requirement(s). Skipped {summary.lessonRequirementsSkipped} already-imported
           requirement(s).
-          {summary.multiTeacherSubjects > 0 && (
-            <>
-              {" "}
-              {summary.multiTeacherSubjects} subject(s) had more than one teacher assigned — only
-              the first was imported; add the others manually in the "Requirements" section.
-            </>
-          )}
         </p>
       )}
     </div>
@@ -783,37 +777,10 @@ function RoomsCard({ schoolId }: { schoolId: string }) {
 // N times a week". This is the data the generator actually reads.
 // =====================================================================
 function LessonRequirementsCard({ schoolId }: { schoolId: string }) {
-  const { data: sections } = useTable<ClassSection>("class_sections", { school_id: schoolId });
-  const { data: subjects } = useTable<Subject>("subjects", { school_id: schoolId });
-  const { data: teachers } = useTable<Teacher>("teachers", { school_id: schoolId });
-  const { data: rooms } = useTable<Room>("rooms", { school_id: schoolId });
-
-  const { data, loading, remove, refresh } = useTable<LessonRequirementRow>(
+  const { data, loading, remove, update } = useTable<LessonRequirementRow>(
     "lesson_requirements",
     { school_id: schoolId }
   );
-
-  const [classSectionId, setClassSectionId] = useState("");
-  const [subjectId, setSubjectId] = useState("");
-  const [teacherId, setTeacherId] = useState("");
-  const [roomId, setRoomId] = useState("");
-  const [periodsPerWeek, setPeriodsPerWeek] = useState("5");
-  const [isLab, setIsLab] = useState(false);
-
-  const submit = async () => {
-    if (!classSectionId || !subjectId || !teacherId || !periodsPerWeek) return;
-    localDb.insert("lesson_requirements", {
-      school_id: schoolId,
-      class_section_id: classSectionId,
-      subject_id: subjectId,
-      teacher_id: teacherId,
-      room_id: roomId || null,
-      periods_per_week: parseInt(periodsPerWeek, 10),
-      is_lab: isLab,
-    });
-    setClassSectionId(""); setSubjectId(""); setTeacherId(""); setRoomId(""); setPeriodsPerWeek("5"); setIsLab(false);
-    refresh();
-  };
 
   return (
     <div className="card space-y-4">
@@ -823,76 +790,73 @@ function LessonRequirementsCard({ schoolId }: { schoolId: string }) {
         </h2>
         <p className="text-sm text-gray-600">
           One row = "this class needs this subject, taught by this teacher, this many times a week."
-          This is what gets turned into the actual timetable.
+          This is what gets turned into the actual timetable — populated by the Academic API
+          import. Edit "Periods/wk" directly, and optionally pin "Day" if a subject must always
+          land on a specific day (e.g. Assembly on Monday); leave it "Any" to let Generate pick
+          freely, same as before.
         </p>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-        <select className="input" value={classSectionId} onChange={(e) => setClassSectionId(e.target.value)}>
-          <option value="">Class - Section</option>
-          {sections.map((s) => (
-            <option key={s.id} value={s.id}>{s.class_name} - {s.section_name}</option>
-          ))}
-        </select>
-        <select className="input" value={subjectId} onChange={(e) => {
-          setSubjectId(e.target.value);
-          const subj = subjects.find((s) => s.id === e.target.value);
-          if (subj) setIsLab(subj.is_lab);
-        }}>
-          <option value="">Subject</option>
-          {subjects.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
-        </select>
-        <select className="input" value={teacherId} onChange={(e) => setTeacherId(e.target.value)}>
-          <option value="">Teacher</option>
-          {teachers.map((t) => (
-            <option key={t.id} value={t.id}>{t.name}</option>
-          ))}
-        </select>
-        <select className="input" value={roomId} onChange={(e) => setRoomId(e.target.value)}>
-          <option value="">Room (optional)</option>
-          {rooms.map((r) => (
-            <option key={r.id} value={r.id}>{r.name}</option>
-          ))}
-        </select>
-        <input className="input" type="number" placeholder="Periods / week" value={periodsPerWeek} onChange={(e) => setPeriodsPerWeek(e.target.value)} />
-        <label className="flex items-center gap-1 text-sm">
-          <input type="checkbox" checked={isLab} onChange={(e) => setIsLab(e.target.checked)} />
-          Schedule as double periods
-        </label>
-      </div>
-      <button className="btn-marigold" onClick={submit}>Add requirement</button>
-
-      {loading ? <p className="text-sm text-gray-500">Loading...</p> : data.length === 0 ? (
-        <p className="text-sm text-gray-500">Nothing added yet.</p>
+      {loading ? (
+        <p className="text-sm text-gray-500">Loading...</p>
+      ) : data.length === 0 ? (
+        <p className="text-sm text-gray-500">
+          Nothing here yet — run the Academic API import, or this list will stay empty since
+          there's no manual "add" form here anymore.
+        </p>
       ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left border-b border-gray-200 text-gray-500">
-              <th className="py-1 pr-4">Class</th>
-              <th className="py-1 pr-4">Subject</th>
-              <th className="py-1 pr-4">Teacher</th>
-              <th className="py-1 pr-4">Room</th>
-              <th className="py-1 pr-4">Periods/wk</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((row) => (
-              <tr key={row.id} className="border-b border-gray-100">
-                <td className="py-2 pr-4">{row.class_sections ? `${row.class_sections.class_name} - ${row.class_sections.section_name}` : "—"}</td>
-                <td className="py-2 pr-4">{row.subjects?.name ?? "—"}</td>
-                <td className="py-2 pr-4">{row.teachers?.name ?? "—"}</td>
-                <td className="py-2 pr-4">{row.rooms?.name ?? "—"}</td>
-                <td className="py-2 pr-4">{row.periods_per_week}{row.is_lab ? " (double)" : ""}</td>
-                <td className="py-2 text-right">
-                  <button className="text-red-500 hover:underline text-xs" onClick={() => remove(row.id)}>Remove</button>
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b border-gray-200 text-gray-500">
+                <th className="py-1 pr-4">Class</th>
+                <th className="py-1 pr-4">Subject</th>
+                <th className="py-1 pr-4">Teacher</th>
+                <th className="py-1 pr-4">Room</th>
+                <th className="py-1 pr-4">Periods/wk</th>
+                <th className="py-1 pr-4">Day</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.map((row) => (
+                <tr key={row.id} className="border-b border-gray-100">
+                  <td className="py-2 pr-4 whitespace-nowrap">{row.class_sections ? `${row.class_sections.class_name} - ${row.class_sections.section_name}` : "—"}</td>
+                  <td className="py-2 pr-4 whitespace-nowrap">{row.subjects?.name ?? "—"}</td>
+                  <td className="py-2 pr-4 whitespace-nowrap">{row.teachers?.name ?? "—"}</td>
+                  <td className="py-2 pr-4 whitespace-nowrap">{row.rooms?.name ?? "—"}{row.is_lab ? " (double)" : ""}</td>
+                  <td className="py-2 pr-4">
+                    <input
+                      type="number"
+                      min={1}
+                      className="input w-16 py-1"
+                      value={row.periods_per_week}
+                      onChange={(e) => {
+                        const n = parseInt(e.target.value, 10);
+                        if (!isNaN(n) && n > 0) update(row.id, { periods_per_week: n });
+                      }}
+                    />
+                  </td>
+                  <td className="py-2 pr-4">
+                    <select
+                      className="input py-1"
+                      value={row.day ?? ""}
+                      onChange={(e) => update(row.id, { day: e.target.value || null })}
+                    >
+                      <option value="">Any</option>
+                      {ALL_DAYS.map((d) => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="py-2 text-right">
+                    <button className="text-red-500 hover:underline text-xs" onClick={() => remove(row.id)}>Remove</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
