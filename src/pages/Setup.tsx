@@ -203,13 +203,6 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
         <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
           Import from Academic API (OD3)
         </h2>
-        <p className="text-sm text-gray-600">
-          Paste the entity ID below and it fetches automatically — pulling every class, section,
-          subject and their assigned teachers from that entity's ERP. Safe to run again later (for
-          this or a different entity) — it skips what's already here. New lesson requirements
-          start at {DEFAULT_PERIODS_PER_WEEK} periods/week; open the "Requirements" section to
-          edit an individual count afterwards if a subject needs something different.
-        </p>
       </div>
       <div className="flex gap-2 items-center flex-wrap">
         <label className="text-sm">Entity ID</label>
@@ -333,21 +326,19 @@ function ClassSelectorCard({
               return (
                 <div
                   key={c.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => toggle(c.id)}
-                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && toggle(c.id)}
-                  className={`flex items-center justify-between gap-2 cursor-pointer rounded-lg border px-3 py-1.5 text-sm transition-colors ${
-                    selected ? "border-[var(--ink-teal)]" : "border-gray-200 hover:border-gray-300"
+                  className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+                    selected ? "border-[var(--ink-teal)]" : "border-gray-200"
                   }`}
                   style={selected ? { background: "var(--ink-teal-light)" } : undefined}
                 >
-                  <span className="truncate">{c.class_name} — {c.section_name}</span>
+                  <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                    <input type="checkbox" checked={selected} onChange={() => toggle(c.id)} />
+                    <span className="truncate">{c.class_name} — {c.section_name}</span>
+                  </label>
                   <button
                     className="text-red-400 hover:text-red-600 text-xs shrink-0"
                     title="Remove"
-                    onClick={(e) => {
-                      e.stopPropagation();
+                    onClick={() => {
                       remove(c.id);
                       onChange((prev) => prev.filter((x) => x !== c.id));
                     }}
