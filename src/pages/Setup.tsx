@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { localDb } from "../lib/localDb";
 import { useTable } from "../lib/useTable";
 import { fetchAllSubjectCourseMappings, DEFAULT_ENTITY_ID } from "../lib/academicApi";
@@ -96,7 +97,7 @@ function SchoolSettings({ school, onSaved }: { school: School | null; onSaved: (
   return (
     <div className="card space-y-4">
       <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
-        1. School settings
+        School settings
       </h2>
       <p className="text-sm text-gray-600">
         This is set up once. It controls how many days a week and how many periods a day the
@@ -210,8 +211,8 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
           Paste the entity ID below and it fetches automatically — pulling every class, section,
           subject and their assigned teachers from that entity's ERP. Safe to run again later (for
           this or a different entity) — it skips what's already here. New lesson requirements are
-          created with the periods/week below; edit them in section 7 afterwards if a subject needs
-          a different count.
+          created with the periods/week below; open "Advanced" further down to edit an individual
+          count afterwards if a subject needs something different.
         </p>
       </div>
       <div className="flex gap-2 items-center flex-wrap">
@@ -244,7 +245,7 @@ function AcademicImportCard({ schoolId, onImported }: { schoolId: string; onImpo
             <>
               {" "}
               {summary.multiTeacherSubjects} subject(s) had more than one teacher assigned — only
-              the first was imported; add the others manually in section 7.
+              the first was imported; add the others manually under "Advanced" further down.
             </>
           )}
         </p>
@@ -272,7 +273,7 @@ function ClassSectionsCard({ schoolId, refreshKey }: { schoolId: string; refresh
     <div className="card space-y-4" key={refreshKey}>
       <div>
         <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
-          2. Classes & sections
+          Classes & sections
         </h2>
         <p className="text-sm text-gray-600">e.g. Class "Grade 6", Section "Ganges"</p>
       </div>
@@ -328,7 +329,7 @@ function SubjectsCard({ schoolId }: { schoolId: string }) {
     <div className="card space-y-4">
       <div>
         <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
-          3. Subjects
+          Subjects
         </h2>
         <p className="text-sm text-gray-600">
           Tick "Lab" for subjects that need two periods back-to-back (e.g. Computer, Science Lab).
@@ -465,7 +466,7 @@ function TeachersCard({ schoolId }: { schoolId: string }) {
     <div className="card space-y-4">
       <div>
         <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
-          4. Teachers
+          Teachers
         </h2>
         <p className="text-sm text-gray-600">
           Max periods/day and max periods/week are optional — leave blank for no limit. Click
@@ -525,7 +526,7 @@ function AvoidAdjacentTeachersCard({ schoolId }: { schoolId: string }) {
     <div className="card space-y-4">
       <div>
         <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
-          5. Teachers that should never be back-to-back
+          Teachers that should never be back-to-back
         </h2>
         <p className="text-sm text-gray-600">
           For the same class, these two teachers' periods will be kept apart wherever possible
@@ -581,7 +582,7 @@ function RoomsCard({ schoolId }: { schoolId: string }) {
     <div className="card space-y-4">
       <div>
         <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
-          6. Rooms (optional)
+          Rooms (optional)
         </h2>
         <p className="text-sm text-gray-600">Only needed for labs/special rooms that can get double-booked.</p>
       </div>
@@ -650,7 +651,7 @@ function LessonRequirementsCard({ schoolId }: { schoolId: string }) {
     <div className="card space-y-4">
       <div>
         <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
-          7. What each class needs to study (the important part)
+          What each class needs to study
         </h2>
         <p className="text-sm text-gray-600">
           One row = "this class needs this subject, taught by this teacher, this many times a week."
@@ -766,19 +767,47 @@ export default function Setup() {
 
   return (
     <div className="max-w-3xl mx-auto p-4 space-y-6">
+      {/* ---- The everyday path: import, confirm subjects, generate. ---- */}
       <AcademicImportCard
         schoolId={school.id}
         onImported={() => setDataRefreshKey((k) => k + 1)}
       />
       <SchoolSettings school={school} onSaved={loadSchool} />
-      <div key={dataRefreshKey} className="space-y-6">
-        <ClassSectionsCard schoolId={school.id} refreshKey={0} />
+      <div key={dataRefreshKey}>
         <SubjectsCard schoolId={school.id} />
-        <TeachersCard schoolId={school.id} />
-        <AvoidAdjacentTeachersCard schoolId={school.id} />
-        <RoomsCard schoolId={school.id} />
-        <LessonRequirementsCard schoolId={school.id} />
       </div>
+
+      <div className="card flex items-center justify-between gap-4 flex-wrap" style={{ background: "var(--ink-teal-light)" }}>
+        <div>
+          <h2 className="font-bold text-lg" style={{ color: "var(--ink-teal)" }}>
+            Ready?
+          </h2>
+          <p className="text-sm text-gray-600">
+            Once the subjects above look right, build the timetable.
+          </p>
+        </div>
+        <Link to="/generate" className="btn-primary whitespace-nowrap">
+          Generate timetable →
+        </Link>
+      </div>
+
+      {/* ---- Everything below is populated automatically by the import ----
+          above; most schools never need to open this. It's here for manual
+          fixes: adding a class the ERP doesn't have yet, capping a
+          teacher's load, keeping two teachers apart, shared rooms, or
+          tweaking an individual periods/week count. */}
+      <details className="card" key={`${dataRefreshKey}-advanced`}>
+        <summary className="font-bold text-lg cursor-pointer select-none" style={{ color: "var(--ink-teal)" }}>
+          Advanced: edit classes, teachers, rooms & requirements manually
+        </summary>
+        <div className="space-y-6 mt-4">
+          <ClassSectionsCard schoolId={school.id} refreshKey={0} />
+          <TeachersCard schoolId={school.id} />
+          <AvoidAdjacentTeachersCard schoolId={school.id} />
+          <RoomsCard schoolId={school.id} />
+          <LessonRequirementsCard schoolId={school.id} />
+        </div>
+      </details>
     </div>
   );
 }

@@ -1,20 +1,12 @@
-// Client for the OD3 academic API (academic-api.odpay.in) — used to pull
-// subject/course/teacher mappings set up in the school's ERP instead of
-// re-entering them by hand in Setup.
+// Client for the OD3 academic API — used to pull subject/course/teacher
+// mappings set up in the school's ERP instead of re-entering them by hand in
+// Setup. The actual call goes through /api/academic-subject-course-mapping
+// (a Vercel serverless function) so the bearer token never reaches the
+// browser — it lives only in server-side env vars, not VITE_-prefixed ones.
 
-const BASE_URL = import.meta.env.VITE_ACADEMIC_API_BASE_URL as string;
-const TOKEN = import.meta.env.VITE_ACADEMIC_API_TOKEN as string;
-const SESSION = import.meta.env.VITE_ACADEMIC_SESSION as string;
-
-// Entity id is *not* read from env — the token grants access to multiple
-// entities, and the caller (Setup page) picks which one to pull per import.
+// Entity id is not a secret — it's just an identifier, safe to expose and to
+// let the caller (Setup page) override per import.
 export const DEFAULT_ENTITY_ID = (import.meta.env.VITE_ACADEMIC_ENTITY_ID as string) ?? "";
-
-if (!BASE_URL || !TOKEN || !SESSION) {
-  console.error(
-    "Missing Academic API env vars. Set VITE_ACADEMIC_API_BASE_URL, VITE_ACADEMIC_API_TOKEN, VITE_ACADEMIC_SESSION."
-  );
-}
 
 export interface AcademicEmployee {
   _id: string;
@@ -55,18 +47,11 @@ async function fetchSubjectCourseMappingPage(
   pageNumber: number,
   pageSize: number
 ): Promise<SubjectCourseMappingResponse> {
-  const res = await fetch(
-    `${BASE_URL}/api/list/subjectCourseMapping?pageSize=${pageSize}&pageNumber=${pageNumber}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // The API expects the raw JWT here, not a "Bearer " prefix.
-        Authorization: TOKEN,
-      },
-      body: JSON.stringify({ entity: entityId, session: SESSION }),
-    }
-  );
+  const res = await fetch("/api/academic-subject-course-mapping", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entity: entityId, pageNumber, pageSize }),
+  });
   if (!res.ok) {
     throw new Error(`Academic API error (${res.status}): ${await res.text()}`);
   }
