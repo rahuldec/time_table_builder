@@ -9,6 +9,7 @@ interface Status {
   placed?: number;
   unplaced?: number;
   ruleViolations?: number;
+  brokenRequirements?: number; // requirements pointing at a deleted class/subject/teacher — skipped
 }
 
 export default function Generate() {
@@ -39,9 +40,33 @@ export default function Generate() {
         ])
       );
 
-      // 4. Load lesson requirements, skipping any subject that's toggled off
-      const lessonRows = localDb
-        .select("lesson_requirements", { school_id: school.id as string })
+      // 4. Load lesson requirements. A requirement can outlive the class,
+      // subject, or teacher it points to (e.g. one of them got removed on
+      // Setup) — subjectMap.get(...) would be undefined for those, and
+      // `undefined !== false` is true, so they'd silently pass the
+      // included-subjects filter below and get scheduled with a blank
+      // subject/teacher in the generated timetable. Drop anything whose
+      // referenced row no longer exists before that filter runs.
+      const classSectionIds = new Set(
+        localDb.select("class_sections", { school_id: school.id as string }).map((c) => c.id)
+      );
+      const subjectIds = new Set(subjectRows.map((s) => s.id));
+      const teacherIds = new Set(teacherRows.map((t) => t.id));
+
+      const allLessonRows = localDb.select("lesson_requirements", { school_id: school.id as string });
+      const brokenLessonRows = allLessonRows.filter(
+        (l) =>
+          !classSectionIds.has(l.class_section_id as string) ||
+          !subjectIds.has(l.subject_id as string) ||
+          !teacherIds.has(l.teacher_id as string)
+      );
+      const lessonRows = allLessonRows
+        .filter(
+          (l) =>
+            classSectionIds.has(l.class_section_id as string) &&
+            subjectIds.has(l.subject_id as string) &&
+            teacherIds.has(l.teacher_id as string)
+        )
         .filter((l) => subjectMap.get(l.subject_id as string)?.included !== false);
 
       if (lessonRows.length === 0) {
@@ -129,12 +154,16 @@ export default function Generate() {
       } else {
         message = "Done! Every period was placed with no clashes, and every rule was respected.";
       }
+      if (brokenLessonRows.length > 0) {
+        message += ` Skipped ${brokenLessonRows.length} requirement(s) pointing at a deleted class, subject, or teacher — remove them in the Requirements section.`;
+      }
 
       setStatus({
         kind: "done",
         placed: result.entries.length,
         unplaced: result.unplaced.length,
         ruleViolations: result.ruleViolations,
+        brokenRequirements: brokenLessonRows.length,
         message,
       });
 

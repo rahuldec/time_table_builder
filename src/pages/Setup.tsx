@@ -51,7 +51,7 @@ interface LessonRequirementRow {
   days?: string[]; // if non-empty, every period of this requirement must land on one of these days
   day?: string | null; // legacy single-day field, read as a fallback if `days` isn't present
   class_sections: { class_name: string; section_name: string } | null;
-  subjects: { name: string } | null;
+  subjects: { name: string; allow_repeat_same_day: boolean } | null;
   teachers: { name: string } | null;
   rooms: { name: string } | null;
 }
@@ -76,16 +76,42 @@ function SchoolSettings({ school, onSaved }: { school: School | null; onSaved: (
     (school?.blocked_periods ?? []).join(", ")
   );
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const toggleDay = (d: string) =>
     setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
 
   const save = async () => {
-    setSaving(true);
-    const blocked = blockedPeriods
+    // Without at least one working day and at least one period/day, there's
+    // no slot the generator could ever place anything into — it would just
+    // run and report everything unplaced, with no clue why. Catch it here
+    // instead.
+    if (days.length === 0) {
+      setError("Pick at least one working day — with none selected, nothing can ever be scheduled.");
+      return;
+    }
+    if (!Number.isInteger(periodsPerDay) || periodsPerDay < 1) {
+      setError("Periods per day must be a whole number of at least 1.");
+      return;
+    }
+
+    // Out-of-range break periods aren't as destructive as the two checks
+    // above (they just don't do anything, rather than breaking generation
+    // entirely), so this one clamps and saves rather than blocking — but
+    // still says so, since a silently-ignored typo is confusing.
+    const requested = blockedPeriods
       .split(",")
       .map((s) => parseInt(s.trim(), 10))
       .filter((n) => !isNaN(n));
+    const outOfRange = requested.filter((n) => n < 1 || n > periodsPerDay);
+    const blocked = requested.filter((n) => n >= 1 && n <= periodsPerDay);
+    setError(
+      outOfRange.length > 0
+        ? `Break period(s) ${outOfRange.join(", ")} are outside 1–${periodsPerDay} (periods per day) and were dropped when saving.`
+        : null
+    );
+
+    setSaving(true);
     const payload = { name, working_days: days, periods_per_day: periodsPerDay, blocked_periods: blocked };
     if (school) {
       localDb.update("schools", school.id, payload);
@@ -146,6 +172,7 @@ function SchoolSettings({ school, onSaved }: { school: School | null; onSaved: (
           placeholder="e.g. 4"
         />
       </div>
+      {error && <p className="text-sm text-red-600">{error}</p>}
       <button className="btn-primary" onClick={save} disabled={saving}>
         {saving ? "Saving..." : "Save school settings"}
       </button>
@@ -881,6 +908,25 @@ function LessonRequirementsCard({ schoolId }: { schoolId: string }) {
                             <span className="text-xs text-gray-400 self-center ml-1">Any</span>
                           )}
                         </div>
+                      );
+                    })()}
+                    {(() => {
+                      const selectedDays = row.days ?? (row.day ? [row.day] : []);
+                      const allowRepeat = row.subjects?.allow_repeat_same_day ?? false;
+                      // Pinning to fewer days than periods/week forces the
+                      // same subject to repeat on a day — fine if "Allow
+                      // twice in one day" is on for the subject, otherwise
+                      // it's a rule violation the generator will silently
+                      // relax rather than leave unplaced. Flag it here so
+                      // it's not a surprise after Generate runs.
+                      if (selectedDays.length === 0 || allowRepeat || row.periods_per_week <= selectedDays.length) {
+                        return null;
+                      }
+                      return (
+                        <p className="text-[10px] text-amber-600 mt-1">
+                          ⚠ {row.periods_per_week} periods but {selectedDays.length} day(s) picked —
+                          will repeat same day
+                        </p>
                       );
                     })()}
                   </td>
