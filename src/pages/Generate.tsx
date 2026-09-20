@@ -2,6 +2,7 @@ import { useState } from "react";
 import { localDb } from "../lib/localDb";
 import { generateTimetable, classifyGenerationStatus } from "../lib/generator";
 import { runFeasibilityChecks } from "../lib/feasibility";
+import { validateGeneratedTimetable } from "../lib/finalValidator";
 import type {
   SchoolConfig,
   Teacher,
@@ -11,6 +12,7 @@ import type {
   UnplacedItem,
   SoftViolation,
   GenerationStatus,
+  FinalValidationIssue,
 } from "../lib/types";
 
 interface NameMaps {
@@ -29,6 +31,11 @@ interface Status {
   unplaced?: UnplacedItem[];
   softViolations?: SoftViolation[];
   searchBudgetExceeded?: boolean;
+  // Set only when the independent final validator (finalValidator.ts) found
+  // a hard-constraint violation in what the generator produced — this
+  // should never happen, and is surfaced distinctly from a normal
+  // incomplete/exhausted result if it ever does.
+  finalIssues?: FinalValidationIssue[];
 }
 
 function classLabel(id: string, names: NameMaps): string {
@@ -48,12 +55,23 @@ function describeIssue(issue: ConfigurationIssue, names: NameMaps): string {
     case "fixed_day_not_working":
       return `A requirement is pinned to ${issue.invalidDays.join(", ")}, which ${issue.invalidDays.length > 1 ? "aren't" : "isn't"} a working day (working days: ${issue.workingDays.join(", ")}).`;
     case "teacher_capacity_exceeded":
-      return `${teacherLabel(issue.teacherId, names)}: needs ${issue.required} periods/${issue.scope} but only ${issue.maximum} ${issue.scope === "week" ? "are" : "per day are"} available — short by ${issue.shortage}.`;
+      return `${teacherLabel(issue.teacherId, names)} requires ${issue.required} periods/${issue.scope} but has only ${issue.maximum} physical teaching slot(s) ${issue.scope === "week" ? "" : "per day "}available — short by ${issue.shortage}.`;
     case "invalid_reference":
       return `A requirement points at a deleted ${issue.missing.join(" / ")} — remove or fix it on the Setup page.`;
     case "school_config_invalid":
       return issue.reason;
   }
+}
+
+function describeFinalIssue(issue: FinalValidationIssue, names: NameMaps): string {
+  const who = [
+    issue.classSectionId ? classLabel(issue.classSectionId, names) : null,
+    issue.subjectId ? subjectLabel(issue.subjectId, names) : null,
+    issue.teacherId ? teacherLabel(issue.teacherId, names) : null,
+  ]
+    .filter(Boolean)
+    .join(" — ");
+  return `[${issue.kind}] ${who ? who + ": " : ""}${issue.reason}`;
 }
 
 export default function Generate() {
@@ -209,17 +227,31 @@ export default function Generate() {
 
       localDb.insert("timetable_entries", rowsToInsert);
 
-      const generationStatus = classifyGenerationStatus(result);
+      // 10. Independent final validation. Re-derives every hard constraint
+      // from the raw entries alone — never trusts the generator's own
+      // bookkeeping. A generated timetable can only ever be reported VALID
+      // or VALID_WITH_WARNINGS if this independently agrees.
+      const finalReport = validateGeneratedTimetable({
+        school: schoolConfig,
+        teachers,
+        requirements: lessons,
+        entries: result.entries,
+        unplaced: result.unplaced,
+        searchBudgetExceeded: result.searchBudgetExceeded,
+      });
+
+      const generationStatus = classifyGenerationStatus(result, finalReport);
       let message: string;
-      if (generationStatus === "incomplete") {
-        message = `Incomplete — ${result.unplaced.length} period(s) could not be placed even though the configuration passed feasibility checks. This means two or more requirements are fighting over the same teacher/room/day combination. See the list below.`;
+      if (!finalReport.valid) {
+        message = `VALIDATION FAILED — the independent final check found ${finalReport.issues.length} hard-constraint problem(s) in the generated timetable that the generator itself didn't report. This should never happen; treat this result as untrustworthy. Details below.`;
+      } else if (generationStatus === "search_exhausted") {
+        message = `SEARCH EXHAUSTED — the scheduler reached its search limit before finding a complete timetable (${result.unplaced.length} period(s) still unplaced). This does NOT prove the configuration is impossible — it means the search ran out of time/steps. Try generating again, or simplify the configuration if this keeps happening.`;
+      } else if (generationStatus === "incomplete") {
+        message = `INCOMPLETE — the search finished (it did not run out of budget) but ${result.unplaced.length} period(s) still could not be placed. Every hard constraint was independently re-verified and passed for the periods that WERE placed. This usually means two or more requirements are genuinely fighting over the same teacher/room/day combination. See the list below.`;
       } else if (generationStatus === "valid_with_warnings") {
-        message = `Valid, with warnings — every period was placed and no hard rule was broken, but ${result.softViolations.length} soft preference(s) (e.g. avoid first/last period, teacher adjacency) couldn't be honored. See the list below.`;
+        message = `VALID, WITH WARNINGS — every period was placed, every hard constraint independently passed, but ${result.softViolations.length} soft preference(s) (e.g. avoid first/last period, teacher adjacency) couldn't be honored. See the list below.`;
       } else {
-        message = "Valid — every period was placed with no clashes, and every hard and soft rule was respected.";
-      }
-      if (result.searchBudgetExceeded) {
-        message += " The search hit its time/step budget, so the unplaced list above is not proof those periods are impossible — just as far as this run got.";
+        message = "VALID — every period was placed, and the independent final check confirms zero hard-constraint violations and zero soft-preference violations.";
       }
 
       setStatus({
@@ -229,6 +261,7 @@ export default function Generate() {
         unplaced: result.unplaced,
         softViolations: result.softViolations,
         searchBudgetExceeded: result.searchBudgetExceeded,
+        finalIssues: finalReport.valid ? undefined : finalReport.issues,
         names,
         message,
       });
@@ -257,15 +290,49 @@ export default function Generate() {
       {status.kind !== "idle" && (
         <div
           className={`card text-sm space-y-2 ${
-            status.kind === "error" || status.kind === "invalid_configuration" ? "border-red-300 text-red-700" : ""
+            status.kind === "error" ||
+            status.kind === "invalid_configuration" ||
+            (status.kind === "done" && status.finalIssues)
+              ? "border-red-300 text-red-700"
+              : status.kind === "done" && status.generationStatus === "search_exhausted"
+                ? "border-amber-300 text-amber-800"
+                : ""
           }`}
         >
-          <p className="font-medium">{status.message}</p>
+          <p className="font-medium whitespace-pre-line">{status.message}</p>
 
           {status.kind === "invalid_configuration" && status.issues && status.names && (
-            <ul className="list-disc pl-5 space-y-1 text-red-700">
+            <ul className="list-disc pl-5 space-y-2 text-red-700">
               {status.issues.map((issue, i) => (
-                <li key={i}>{describeIssue(issue, status.names!)}</li>
+                <li key={i}>
+                  {describeIssue(issue, status.names!)}
+                  {issue.kind === "teacher_capacity_exceeded" && issue.breakdown.length > 0 && (
+                    <table className="mt-1 text-xs border-collapse">
+                      <thead>
+                        <tr className="text-left">
+                          <th className="pr-4 font-medium">Class</th>
+                          <th className="pr-4 font-medium">Subject</th>
+                          <th className="font-medium">Periods/week</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {issue.breakdown.map((b, j) => (
+                          <tr key={j}>
+                            <td className="pr-4">{classLabel(b.classSectionId, status.names!)}</td>
+                            <td className="pr-4">{subjectLabel(b.subjectId, status.names!)}</td>
+                            <td>{b.periodsPerWeek}</td>
+                          </tr>
+                        ))}
+                        <tr className="font-medium border-t border-red-200">
+                          <td className="pr-4" colSpan={2}>
+                            Total
+                          </td>
+                          <td>{issue.breakdown.reduce((sum, b) => sum + b.periodsPerWeek, 0)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  )}
+                </li>
               ))}
             </ul>
           )}
@@ -277,6 +344,19 @@ export default function Generate() {
                 {status.placed} · Unplaced: {status.unplaced?.length ?? 0} · Soft warnings:{" "}
                 {status.softViolations?.length ?? 0}
               </p>
+
+              {status.finalIssues && status.finalIssues.length > 0 && status.names && (
+                <div>
+                  <p className="font-medium text-red-700 mt-2">
+                    Independent validator findings (this should never happen):
+                  </p>
+                  <ul className="list-disc pl-5 space-y-1 text-red-700">
+                    {status.finalIssues.map((issue, i) => (
+                      <li key={i}>{describeFinalIssue(issue, status.names!)}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {status.unplaced && status.unplaced.length > 0 && status.names && (
                 <div>

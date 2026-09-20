@@ -47,6 +47,9 @@ interface Room {
 interface LessonRequirementRow {
   id: string;
   periods_per_week: number;
+  // true when periods_per_week was never set by a human — it's just the
+  // import's guessed default, not a real curriculum value.
+  periods_per_week_is_default?: boolean;
   is_lab: boolean;
   days?: string[]; // if non-empty, every period of this requirement must land on one of these days
   day?: string | null; // legacy single-day field, read as a fallback if `days` isn't present
@@ -867,16 +870,30 @@ function LessonRequirementsCard({ schoolId, workingDays }: { schoolId: string; w
                   <td className="py-2 pr-4 whitespace-nowrap">{row.teachers?.name ?? "—"}</td>
                   <td className="py-2 pr-4 whitespace-nowrap">{row.rooms?.name ?? "—"}{row.is_lab ? " (double)" : ""}</td>
                   <td className="py-2 pr-4">
-                    <input
-                      type="number"
-                      min={1}
-                      className="input w-16 py-1"
-                      value={row.periods_per_week}
-                      onChange={(e) => {
-                        const n = parseInt(e.target.value, 10);
-                        if (!isNaN(n) && n > 0) update(row.id, { periods_per_week: n });
-                      }}
-                    />
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min={1}
+                        className="input w-16 py-1"
+                        value={row.periods_per_week}
+                        onChange={(e) => {
+                          const n = parseInt(e.target.value, 10);
+                          if (!isNaN(n) && n > 0) {
+                            // Editing it by hand means it's no longer a
+                            // guessed default — it's a verified value.
+                            update(row.id, { periods_per_week: n, periods_per_week_is_default: false });
+                          }
+                        }}
+                      />
+                      {row.periods_per_week_is_default && (
+                        <span
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 whitespace-nowrap"
+                          title="This came from the import's default guess, not real curriculum data — verify it."
+                        >
+                          Default — needs verification
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-2 pr-4">
                     {(() => {

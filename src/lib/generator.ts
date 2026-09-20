@@ -8,6 +8,8 @@ import type {
   GenerationResult,
   TeacherPair,
   SoftViolation,
+  GenerationStatus,
+  FinalValidationReport,
 } from "./types";
 import { allowedDaysFor } from "./feasibility";
 
@@ -486,10 +488,21 @@ export function generateTimetable(opts: GenerateOptions): GenerationResult {
 // Classifies a *post-generation* result. Does not cover "invalid_configuration"
 // — that's decided by feasibility.ts's runFeasibilityChecks BEFORE generation
 // is attempted at all, since it's a property of the input, not the output.
+//
+// `finalValidation` MUST come from finalValidator.ts's independent
+// re-check of the actual entries — never from the generator's own
+// bookkeeping. If it found even one hard-constraint violation, this can
+// never return "valid" or "valid_with_warnings", regardless of what
+// `result` itself claims (that would defeat the entire point of having an
+// independent check in the first place).
 export function classifyGenerationStatus(
-  result: Pick<GenerationResult, "unplaced" | "softViolations">
-): "valid" | "valid_with_warnings" | "incomplete" {
-  if (result.unplaced.length > 0) return "incomplete";
+  result: Pick<GenerationResult, "unplaced" | "softViolations" | "searchBudgetExceeded">,
+  finalValidation: FinalValidationReport
+): GenerationStatus {
+  if (!finalValidation.valid) return "incomplete";
+  if (result.unplaced.length > 0) {
+    return result.searchBudgetExceeded ? "search_exhausted" : "incomplete";
+  }
   if (result.softViolations.length > 0) return "valid_with_warnings";
   return "valid";
 }

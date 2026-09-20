@@ -187,6 +187,10 @@ export function importAcademicMappings(
           subject_id: subjectId,
           teacher_id: teacherId,
           periods_per_week: defaultPeriodsPerWeek,
+          // The ERP mapping has no real periods/week value — this is a
+          // guessed default, not curriculum data. Flagged so Setup can show
+          // it as unverified until a human confirms or edits it.
+          periods_per_week_is_default: true,
           is_lab: false,
           days: [],
         });

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { generateTimetable, classifyGenerationStatus } from "./generator";
+import { validateGeneratedTimetable } from "./finalValidator";
 import type { SchoolConfig, Teacher, LessonRequirement, TimetableEntry } from "./types";
 
 function school(overrides: Partial<SchoolConfig> = {}): SchoolConfig {
@@ -210,7 +211,17 @@ describe("a genuinely feasible requirement generates successfully", () => {
       attempts: 5,
     });
     expect(result.unplaced).toHaveLength(0);
-    expect(classifyGenerationStatus(result)).toBe("valid");
+    const teachers = [teacher("teacher-1")];
+    const finalReport = validateGeneratedTimetable({
+      school: s,
+      teachers,
+      requirements: lessons,
+      entries: result.entries,
+      unplaced: result.unplaced,
+      searchBudgetExceeded: result.searchBudgetExceeded,
+    });
+    expect(finalReport.valid).toBe(true);
+    expect(classifyGenerationStatus(result, finalReport)).toBe("valid");
   });
 });
 
@@ -228,7 +239,17 @@ describe("a soft-preference violation keeps the result VALID_WITH_WARNINGS, not 
     });
     expect(result.unplaced).toHaveLength(0);
     expect(result.softViolations.length).toBeGreaterThan(0);
-    expect(classifyGenerationStatus(result)).toBe("valid_with_warnings");
+    const teachers = [teacher("teacher-1")];
+    const finalReport = validateGeneratedTimetable({
+      school: s,
+      teachers,
+      requirements: lessons,
+      entries: result.entries,
+      unplaced: result.unplaced,
+      searchBudgetExceeded: result.searchBudgetExceeded,
+    });
+    expect(finalReport.valid).toBe(true);
+    expect(classifyGenerationStatus(result, finalReport)).toBe("valid_with_warnings");
   });
 });
 
@@ -299,5 +320,43 @@ describe("fixed days are always intersected with working days", () => {
     expect(result.entries).toHaveLength(0);
     expect(result.unplaced).toHaveLength(1);
     expect(result.entries.some((e) => e.day === "Sat")).toBe(false);
+  });
+});
+
+describe("SEARCH_EXHAUSTED is distinct from INCOMPLETE and never claims impossibility", () => {
+  it("a run that hit its search budget with unplaced periods classifies as search_exhausted, not incomplete", () => {
+    // classifyGenerationStatus doesn't run the search itself — this directly
+    // exercises the classification logic for the case where the generator
+    // ran out of budget (searchBudgetExceeded: true) rather than proving
+    // every unplaced unit has no valid slot.
+    const result = {
+      unplaced: [{ lessonRequirementId: "r1", classSectionId: "c1", subjectId: "s1", teacherId: "t1", reason: "budget" }],
+      softViolations: [],
+      searchBudgetExceeded: true,
+    };
+    const finalReport = { valid: true, issues: [] };
+    expect(classifyGenerationStatus(result, finalReport)).toBe("search_exhausted");
+  });
+
+  it("a run with unplaced periods but NO budget exhaustion classifies as incomplete, not search_exhausted", () => {
+    const result = {
+      unplaced: [{ lessonRequirementId: "r1", classSectionId: "c1", subjectId: "s1", teacherId: "t1", reason: "proven impossible given other placements" }],
+      softViolations: [],
+      searchBudgetExceeded: false,
+    };
+    const finalReport = { valid: true, issues: [] };
+    expect(classifyGenerationStatus(result, finalReport)).toBe("incomplete");
+  });
+
+  it("search_exhausted is never reported as invalid_configuration — that status is reserved for feasibility.ts, pre-generation", () => {
+    const result = {
+      unplaced: [{ lessonRequirementId: "r1", classSectionId: "c1", subjectId: "s1", teacherId: "t1", reason: "budget" }],
+      softViolations: [],
+      searchBudgetExceeded: true,
+    };
+    const finalReport = { valid: true, issues: [] };
+    const status = classifyGenerationStatus(result, finalReport);
+    expect(status).not.toBe("invalid_configuration");
+    expect(status).not.toBe("incomplete");
   });
 });

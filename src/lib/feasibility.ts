@@ -33,7 +33,7 @@ function isBlocked(school: SchoolConfig, period: number): boolean {
   return !!school.blockedPeriods?.includes(period);
 }
 
-function availablePeriodsPerDay(school: SchoolConfig): number {
+export function availablePeriodsPerDay(school: SchoolConfig): number {
   let count = 0;
   for (let p = 1; p <= school.periodsPerDay; p++) {
     if (!isBlocked(school, p)) count++;
@@ -144,6 +144,27 @@ export function checkRequirementFeasibility(
   };
 }
 
+// A person can never occupy two slots at once, no matter what cap (if any)
+// is configured on their record — so the school's own weekly/daily slot
+// count is an absolute, implicit ceiling every teacher is bound by. The
+// *effective* cap actually in force is always the tighter of the two: an
+// explicit configured cap only matters when it's stricter than what's
+// physically possible, and physical reality wins whenever nobody bothered
+// to configure a cap at all (or configured one looser than reality).
+export function physicalWeeklyCapacity(school: SchoolConfig): number {
+  return availablePeriodsPerDay(school) * school.workingDays.length;
+}
+
+export function effectiveWeeklyCapacity(teacher: Teacher, school: SchoolConfig): number {
+  const physical = physicalWeeklyCapacity(school);
+  return teacher.maxPeriodsPerWeek != null ? Math.min(teacher.maxPeriodsPerWeek, physical) : physical;
+}
+
+export function effectiveDailyCapacity(teacher: Teacher, school: SchoolConfig): number {
+  const physical = availablePeriodsPerDay(school);
+  return teacher.maxPeriodsPerDay != null ? Math.min(teacher.maxPeriodsPerDay, physical) : physical;
+}
+
 export function validateTeacherCapacity(
   requirements: LessonRequirement[],
   teachers: Teacher[],
@@ -151,21 +172,23 @@ export function validateTeacherCapacity(
 ): ConfigurationIssue[] {
   const issues: ConfigurationIssue[] = [];
   const weeklyByTeacher = new Map<string, number>();
+  const breakdownByTeacher = new Map<string, { classSectionId: string; subjectId: string; periodsPerWeek: number }[]>();
   for (const req of requirements) {
     weeklyByTeacher.set(req.teacherId, (weeklyByTeacher.get(req.teacherId) ?? 0) + req.periodsPerWeek);
+    if (!breakdownByTeacher.has(req.teacherId)) breakdownByTeacher.set(req.teacherId, []);
+    breakdownByTeacher.get(req.teacherId)!.push({
+      classSectionId: req.classSectionId,
+      subjectId: req.subjectId,
+      periodsPerWeek: req.periodsPerWeek,
+    });
   }
 
-  // A person can never occupy two slots at once, no matter what cap (if any)
-  // is configured on their record — so the school's own weekly slot count
-  // (working days × non-blocked periods/day) is an absolute, implicit
-  // ceiling every teacher is bound by. This catches over-subscription (a
-  // teacher shared across too many classes) even when nobody ever bothered
-  // to set an explicit maxPeriodsPerWeek/maxPeriodsPerDay on that teacher.
-  const implicitWeeklyCeiling = availablePeriodsPerDay(school) * school.workingDays.length;
+  const implicitWeeklyCeiling = physicalWeeklyCapacity(school);
 
   for (const t of teachers) {
     const required = weeklyByTeacher.get(t.id) ?? 0;
     if (required === 0) continue;
+    const breakdown = breakdownByTeacher.get(t.id) ?? [];
 
     let flagged = false;
 
@@ -178,6 +201,7 @@ export function validateTeacherCapacity(
         shortage: required - t.maxPeriodsPerWeek,
         scope: "week",
         reason: `Teacher requires ${required} periods/week but is capped at ${t.maxPeriodsPerWeek}/week.`,
+        breakdown,
       });
       flagged = true;
     }
@@ -196,6 +220,7 @@ export function validateTeacherCapacity(
           shortage: required - impliedWeeklyCeiling,
           scope: "day",
           reason: `Teacher requires ${required} periods/week, which can't fit within a ${t.maxPeriodsPerDay}/day cap across ${school.workingDays.length} working day(s) (max ${impliedWeeklyCeiling}/week).`,
+          breakdown,
         });
         flagged = true;
       }
@@ -213,6 +238,7 @@ export function validateTeacherCapacity(
         shortage: required - implicitWeeklyCeiling,
         scope: "week",
         reason: `Teacher requires ${required} periods/week, but the school week only has ${implicitWeeklyCeiling} periods total (${school.workingDays.length} day(s) × ${availablePeriodsPerDay(school)} period(s)/day) — no single teacher can be scheduled for more than that, regardless of any configured cap.`,
+        breakdown,
       });
     }
   }

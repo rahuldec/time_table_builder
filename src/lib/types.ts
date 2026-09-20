@@ -110,8 +110,9 @@ export interface GenerationResult {
 export type GenerationStatus =
   | "valid" // every period placed, zero hard constraints violated, zero soft violations
   | "valid_with_warnings" // every period placed, zero hard constraints violated, some soft preferences relaxed
-  | "incomplete" // configuration is feasible in principle but some periods could not be placed
-  | "invalid_configuration"; // the requirements are mathematically contradictory — generation was not attempted
+  | "incomplete" // search completed (did not hit its budget) but some periods could not be placed
+  | "invalid_configuration" // the requirements are mathematically contradictory — generation was not attempted
+  | "search_exhausted"; // the search hit its step/time budget before finishing — NOT proof the configuration is impossible
 
 export interface RequirementFeasibilityIssue {
   kind: "requirement_infeasible";
@@ -142,6 +143,10 @@ export interface TeacherCapacityIssue {
   scope: "week" | "day";
   day?: string; // present when scope === "day"
   reason: string;
+  // Per class/subject contribution to `required`, so a curriculum/import
+  // problem (e.g. one teacher assigned to far too many classes) can be told
+  // apart from a genuinely overloaded configuration at a glance.
+  breakdown: { classSectionId: string; subjectId: string; periodsPerWeek: number }[];
 }
 
 export interface ReferenceIssue {
@@ -166,4 +171,45 @@ export type ConfigurationIssue =
 export interface FeasibilityReport {
   valid: boolean;
   issues: ConfigurationIssue[];
+}
+
+// ===== Final (post-generation) validation =====
+//
+// Independently re-derives hard-constraint compliance from the raw
+// TimetableEntry[] a generation run produced, WITHOUT trusting any of the
+// generator's own bookkeeping (grids, counters, "unplaced" list). This is
+// the last line of defense: a generator bug that let a hard rule slip
+// through must be caught here, or the app must never say VALID.
+
+export type FinalValidationIssueKind =
+  | "class_double_booking"
+  | "teacher_double_booking"
+  | "room_double_booking"
+  | "non_working_day"
+  | "fixed_day_violation"
+  | "no_repeat_violation"
+  | "teacher_unavailable"
+  | "room_unavailable"
+  | "blocked_period"
+  | "teacher_daily_max_exceeded"
+  | "teacher_weekly_max_exceeded"
+  | "required_period_count_mismatch"
+  | "double_period_continuity_violation"
+  | "duplicate_entry";
+
+export interface FinalValidationIssue {
+  kind: FinalValidationIssueKind;
+  reason: string;
+  lessonRequirementId?: string;
+  classSectionId?: string;
+  subjectId?: string;
+  teacherId?: string;
+  roomId?: string;
+  day?: string;
+  period?: number;
+}
+
+export interface FinalValidationReport {
+  valid: boolean;
+  issues: FinalValidationIssue[];
 }
