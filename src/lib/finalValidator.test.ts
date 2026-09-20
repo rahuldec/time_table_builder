@@ -37,8 +37,6 @@ function baseInput(overrides: Partial<FinalValidationInput> = {}): FinalValidati
     teachers: [teacher("teacher-1")],
     requirements: [req({ id: "r1", periodsPerWeek: 1 })],
     entries: [],
-    unplaced: [],
-    searchBudgetExceeded: false,
     ...overrides,
   };
 }
@@ -134,36 +132,38 @@ describe("validateGeneratedTimetable — catches every hard-constraint violation
   });
 
   // Case 8
-  it("catches an incorrect required-period count when the run claims completeness", () => {
+  it("catches an incorrect required-period count — computed purely from entries vs. requirements, no generator flags involved", () => {
     const requirements = [req({ id: "r1", periodsPerWeek: 3 })];
     const entries = [entry({ day: "Mon", period: 1 })]; // only 1 of 3 placed
-    const report = validateGeneratedTimetable(
-      baseInput({ requirements, entries, unplaced: [], searchBudgetExceeded: false })
-    );
+    // Note: FinalValidationInput has no `unplaced`/`searchBudgetExceeded`
+    // fields at all — this call can't lean on them even if it wanted to.
+    const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
     expect(report.valid).toBe(false);
-    expect(report.issues.some((i) => i.kind === "required_period_count_mismatch")).toBe(true);
+    const issue = report.issues.find((i) => i.kind === "required_period_count_mismatch");
+    expect(issue).toBeDefined();
+    expect(issue?.direction).toBe("under");
   });
 
-  it("does NOT flag a period-count shortfall when the generator honestly reports it as incomplete/exhausted", () => {
+  it("flags a period-count shortfall unconditionally — every time, with no notion of an 'acceptable' shortfall", () => {
+    // Same shortfall as above, called twice with identical inputs: the
+    // result must be identical every time, since there is no generator
+    // context this function could possibly consult to vary its answer.
     const requirements = [req({ id: "r1", periodsPerWeek: 3 })];
     const entries = [entry({ day: "Mon", period: 1 })];
-    const report = validateGeneratedTimetable(
-      baseInput({
-        requirements,
-        entries,
-        unplaced: [{ lessonRequirementId: "r1", classSectionId: "class-1", subjectId: "subj-1", teacherId: "teacher-1", reason: "x" }],
-        searchBudgetExceeded: true,
-      })
-    );
-    expect(report.issues.some((i) => i.kind === "required_period_count_mismatch")).toBe(false);
+    const reportA = validateGeneratedTimetable(baseInput({ requirements, entries }));
+    const reportB = validateGeneratedTimetable(baseInput({ requirements, entries }));
+    expect(reportA.issues.some((i) => i.kind === "required_period_count_mismatch")).toBe(true);
+    expect(reportB.issues.some((i) => i.kind === "required_period_count_mismatch")).toBe(true);
   });
 
-  it("always flags over-placement, even when the run claims completeness", () => {
+  it("always flags over-placement, tagged with direction 'over'", () => {
     const requirements = [req({ id: "r1", periodsPerWeek: 1 })];
     const entries = [entry({ day: "Mon", period: 1 }), entry({ day: "Tue", period: 1 })]; // 2 placed, 1 required
     const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
     expect(report.valid).toBe(false);
-    expect(report.issues.some((i) => i.kind === "required_period_count_mismatch")).toBe(true);
+    const issue = report.issues.find((i) => i.kind === "required_period_count_mismatch");
+    expect(issue).toBeDefined();
+    expect(issue?.direction).toBe("over");
   });
 
   // Case 9
@@ -264,8 +264,6 @@ describe("independence proof: the final validator does not just trust the genera
       teachers,
       requirements,
       entries: result.entries,
-      unplaced: result.unplaced,
-      searchBudgetExceeded: result.searchBudgetExceeded,
     });
     expect(cleanReport.valid).toBe(true);
 
@@ -298,8 +296,6 @@ describe("independence proof: the final validator does not just trust the genera
       teachers,
       requirements,
       entries: finalEntries,
-      unplaced: result.unplaced,
-      searchBudgetExceeded: result.searchBudgetExceeded,
     });
 
     expect(corruptedReport.valid).toBe(false);
@@ -325,11 +321,72 @@ describe("independence proof: the final validator does not just trust the genera
       teachers,
       requirements,
       entries: corrupted,
-      unplaced: result.unplaced,
-      searchBudgetExceeded: result.searchBudgetExceeded,
     });
 
     expect(report.valid).toBe(false);
     expect(report.issues.some((i) => i.kind === "no_repeat_violation")).toBe(true);
+  });
+});
+
+describe("black-box timetable audit — end to end, using only the raw output + configuration + requirements", () => {
+  it("generates a realistic multi-class/teacher/room timetable, then independently audits every hard constraint from scratch", () => {
+    const s = school({ workingDays: ["Mon", "Tue", "Wed", "Thu", "Fri"], periodsPerDay: 8 });
+
+    const teachers = [
+      teacher("t1", { unavailable: [{ day: "Mon", period: 1 }] }),
+      teacher("t2"),
+    ];
+
+    const requirements: LessonRequirement[] = [
+      // Regular subject, tightly pinned to exactly as many fixed days as
+      // periods required (zero slack — a real stress test of the fixed-day
+      // and no-repeat checks together).
+      req({ id: "math-c1", classSectionId: "c1", subjectId: "math", teacherId: "t1", periodsPerWeek: 3, fixedDays: ["Mon", "Wed", "Fri"], allowRepeatSameDay: false }),
+      req({ id: "math-c2", classSectionId: "c2", subjectId: "math", teacherId: "t1", periodsPerWeek: 2, fixedDays: ["Tue", "Thu"], allowRepeatSameDay: false }),
+      // Unrestricted regular subject.
+      req({ id: "math-c3", classSectionId: "c3", subjectId: "math", teacherId: "t1", periodsPerWeek: 5, allowRepeatSameDay: false }),
+      // Lab subject sharing ONE room across three different classes — a
+      // real test of independently-verified room double-booking freedom.
+      req({ id: "sci-c1", classSectionId: "c1", subjectId: "sci", teacherId: "t2", periodsPerWeek: 4, isLab: true, roomId: "room1", allowRepeatSameDay: false }),
+      req({ id: "sci-c2", classSectionId: "c2", subjectId: "sci", teacherId: "t2", periodsPerWeek: 2, isLab: true, roomId: "room1", allowRepeatSameDay: false }),
+      req({ id: "sci-c3", classSectionId: "c3", subjectId: "sci", teacherId: "t2", periodsPerWeek: 2, isLab: true, roomId: "room1", allowRepeatSameDay: false }),
+    ];
+
+    const result = generateTimetable({ school: s, teachers, classSections: [], lessons: requirements, attempts: 10 });
+    expect(result.unplaced).toHaveLength(0); // sanity: this scenario is genuinely feasible
+
+    // The audit: ONLY school + teachers + requirements + the raw entries.
+    // No `result.unplaced`, no `result.searchBudgetExceeded`, no generator
+    // object of any kind is passed in.
+    const report = validateGeneratedTimetable({
+      school: s,
+      teachers,
+      requirements,
+      entries: result.entries,
+    });
+
+    expect(report.valid).toBe(true);
+    expect(report.issues).toHaveLength(0);
+
+    // Explicit per-check assertions, so a regression in any ONE check can't
+    // hide behind an aggregate `issues.length === 0`.
+    const kinds = new Set(report.issues.map((i) => i.kind));
+    expect(kinds.has("required_period_count_mismatch")).toBe(false); // every required period count matches
+    expect(kinds.has("class_double_booking")).toBe(false);
+    expect(kinds.has("teacher_double_booking")).toBe(false);
+    expect(kinds.has("room_double_booking")).toBe(false);
+    expect(kinds.has("fixed_day_violation")).toBe(false);
+    expect(kinds.has("non_working_day")).toBe(false);
+    expect(kinds.has("no_repeat_violation")).toBe(false);
+    expect(kinds.has("teacher_unavailable")).toBe(false);
+    expect(kinds.has("teacher_daily_max_exceeded")).toBe(false);
+    expect(kinds.has("teacher_weekly_max_exceeded")).toBe(false);
+    expect(kinds.has("double_period_continuity_violation")).toBe(false);
+
+    // And a direct, independent recount for one requirement, proving the
+    // audit isn't just trusting `report.valid` — it's re-deriving the
+    // actual placed count itself.
+    const c3MathPlaced = result.entries.filter((e) => e.classSectionId === "c3" && e.subjectId === "math").length;
+    expect(c3MathPlaced).toBe(5);
   });
 });

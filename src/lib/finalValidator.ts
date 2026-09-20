@@ -1,16 +1,30 @@
 // ===========================================================
-// Independent final validation of a GENERATED timetable.
+// Independent final validation of a GENERATED timetable — a black-box
+// audit. It takes ONLY the raw TimetableEntry[] a generation run produced
+// plus the same LessonRequirement[]/Teacher[]/SchoolConfig inputs it was
+// given, the same way a human double-checking the output by hand would.
+// It has NO access to and takes NO input from the generator's own
+// bookkeeping — no grids, no counters, no "unplaced" list, no
+// "searchBudgetExceeded" flag. Every hard constraint, INCLUDING whether
+// every requirement's periods-per-week was actually satisfied, is
+// re-derived here from first principles.
 //
-// This module does not trust the generator's own bookkeeping (its grids,
-// counters, or "unplaced" list) at all. It re-derives every hard constraint
-// from scratch, purely from the raw TimetableEntry[] the generator produced
-// plus the same LessonRequirement[]/Teacher[]/SchoolConfig[] inputs it was
-// given — the same way a human double-checking the output by hand would.
-//
-// The whole point: a bug in generator.ts's placement bookkeeping must never
-// be able to make an invalid timetable look VALID. If this validator finds
+// The whole point: a bug in generator.ts's placement bookkeeping — or in
+// what it *claims* about its own completeness — must never be able to make
+// an invalid or incomplete timetable look VALID. If this validator finds
 // even one hard-constraint violation, the result can never be reported as
 // VALID or VALID_WITH_WARNINGS, no matter what the generator itself claimed.
+//
+// This module makes no judgment about whether a period-count shortfall is
+// "acceptable" (e.g. because the search legitimately ran out of budget) —
+// that interpretation requires knowing about the search process itself,
+// which is generator-internal information a black-box audit of the output
+// can never have. It simply reports the fact: required N, placed M. The
+// caller (generator.ts's classifyGenerationStatus) is the one place
+// permitted to combine this fact with the generator's own
+// searchBudgetExceeded flag, purely to choose between two honest labels for
+// an already-independently-confirmed incompleteness (INCOMPLETE vs
+// SEARCH_EXHAUSTED) — never to decide whether the shortfall itself is real.
 //
 // What this does NOT check: soft preferences (avoid first/last period,
 // teacher adjacency) — those are, by definition, allowed to be violated and
@@ -22,7 +36,6 @@ import type {
   Teacher,
   LessonRequirement,
   TimetableEntry,
-  UnplacedItem,
   FinalValidationIssue,
   FinalValidationReport,
 } from "./types";
@@ -41,17 +54,15 @@ function classSubjectKey(classSectionId: string, subjectId: string): string {
   return `${classSectionId}::${subjectId}`;
 }
 
+// The ONLY inputs this module accepts: the raw output entries, and the
+// same configuration/requirements the generator was given. Deliberately no
+// `unplaced` list, no `searchBudgetExceeded` flag, no generator result of
+// any kind — see the module doc above for why.
 export interface FinalValidationInput {
   school: SchoolConfig;
   teachers: Teacher[];
   requirements: LessonRequirement[];
   entries: TimetableEntry[];
-  // From the generator's own result — used ONLY to tell "expected shortfall
-  // because generation is genuinely incomplete/exhausted" apart from "the
-  // generator claims success but the entries don't actually add up", which
-  // is never legitimate. Every other check in this module ignores these.
-  unplaced: UnplacedItem[];
-  searchBudgetExceeded: boolean;
 }
 
 function isBlocked(school: SchoolConfig, period: number): boolean {
@@ -60,6 +71,17 @@ function isBlocked(school: SchoolConfig, period: number): boolean {
 
 function isTeacherUnavailable(teacher: Teacher | undefined, day: string, period: number): boolean {
   return !!teacher?.unavailable?.some((s) => s.day === day && s.period === period);
+}
+
+// An "under" required_period_count_mismatch is the ONE issue kind that is
+// expected and normal for a genuinely incomplete/exhausted run — it's not,
+// by itself, proof of a bug. Every other issue kind (including an "over"
+// mismatch) represents something that must never happen, regardless of how
+// complete the run is. Callers that need to distinguish "the generator has
+// a genuine, honest shortfall" from "something is actually broken" should
+// use this, rather than re-deriving the distinction themselves.
+export function isStructuralIssue(issue: FinalValidationIssue): boolean {
+  return !(issue.kind === "required_period_count_mismatch" && issue.direction === "under");
 }
 
 export function validateGeneratedTimetable(input: FinalValidationInput): FinalValidationReport {
@@ -236,20 +258,23 @@ export function validateGeneratedTimetable(input: FinalValidationInput): FinalVa
       teacherWeeklyCount.set(req.teacherId, (teacherWeeklyCount.get(req.teacherId) ?? 0) + 1);
     }
 
-    // Required period count: an over-placement is never legitimate. An
-    // under-placement is only ever legitimate when the generator itself
-    // says the run was incomplete/exhausted — if it claims a clean,
-    // exhaustive success yet a requirement still came up short, that's a
-    // genuine bug, not a normal outcome.
+    // Required period count: computed purely from the raw entries against
+    // the requirement's own periodsPerWeek — no generator flag of any kind
+    // is consulted here. Over-placement is never legitimate; under-
+    // placement is reported as a plain fact every time it's found. It is
+    // the CALLER's job (using isStructuralIssue / generator.ts's
+    // classifyGenerationStatus) to decide what an "under" mismatch means —
+    // this function makes no claim about whether it's acceptable.
     const placed = reqEntries.length;
-    const runClaimsComplete = input.unplaced.length === 0 && !input.searchBudgetExceeded;
-    if (placed > req.periodsPerWeek || (placed < req.periodsPerWeek && runClaimsComplete)) {
+    if (placed !== req.periodsPerWeek) {
+      const direction = placed > req.periodsPerWeek ? "over" : "under";
       issues.push({
         kind: "required_period_count_mismatch",
         lessonRequirementId: req.id,
         classSectionId: req.classSectionId,
         subjectId: req.subjectId,
         teacherId: req.teacherId,
+        direction,
         reason: `Requires ${req.periodsPerWeek} period(s)/week but the timetable has ${placed}.`,
       });
     }

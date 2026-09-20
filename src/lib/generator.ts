@@ -12,6 +12,7 @@ import type {
   FinalValidationReport,
 } from "./types";
 import { allowedDaysFor } from "./feasibility";
+import { isStructuralIssue } from "./finalValidator";
 
 // ===========================================================
 // Constraint-aware scheduler with backtracking.
@@ -490,17 +491,30 @@ export function generateTimetable(opts: GenerateOptions): GenerationResult {
 // is attempted at all, since it's a property of the input, not the output.
 //
 // `finalValidation` MUST come from finalValidator.ts's independent
-// re-check of the actual entries — never from the generator's own
-// bookkeeping. If it found even one hard-constraint violation, this can
-// never return "valid" or "valid_with_warnings", regardless of what
-// `result` itself claims (that would defeat the entire point of having an
-// independent check in the first place).
+// black-box audit of the actual entries — it never sees the generator's own
+// "unplaced" list or "searchBudgetExceeded" flag, so its determination of
+// WHETHER every requirement's periods were satisfied is fully independent.
+// This function is the one place allowed to combine that independent fact
+// with `result.searchBudgetExceeded` — but only to choose which of two
+// honest labels (INCOMPLETE vs SEARCH_EXHAUSTED) describes an
+// already-independently-confirmed shortfall, never to decide whether the
+// shortfall itself is real.
+//
+// Any *structural* final-validation issue (double-booking, a fixed-day
+// violation, an over-placement, etc. — anything other than an "under"
+// required_period_count_mismatch) means something is genuinely broken and
+// this can never return "valid" or "valid_with_warnings", regardless of
+// what `result` itself claims.
 export function classifyGenerationStatus(
-  result: Pick<GenerationResult, "unplaced" | "softViolations" | "searchBudgetExceeded">,
+  result: Pick<GenerationResult, "softViolations" | "searchBudgetExceeded">,
   finalValidation: FinalValidationReport
 ): GenerationStatus {
-  if (!finalValidation.valid) return "incomplete";
-  if (result.unplaced.length > 0) {
+  if (finalValidation.issues.some(isStructuralIssue)) return "incomplete";
+
+  const hasShortfall = finalValidation.issues.some(
+    (i) => i.kind === "required_period_count_mismatch" && i.direction === "under"
+  );
+  if (hasShortfall) {
     return result.searchBudgetExceeded ? "search_exhausted" : "incomplete";
   }
   if (result.softViolations.length > 0) return "valid_with_warnings";

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { localDb } from "../lib/localDb";
 import { generateTimetable, classifyGenerationStatus } from "../lib/generator";
 import { runFeasibilityChecks } from "../lib/feasibility";
-import { validateGeneratedTimetable } from "../lib/finalValidator";
+import { validateGeneratedTimetable, isStructuralIssue } from "../lib/finalValidator";
 import type {
   SchoolConfig,
   Teacher,
@@ -227,23 +227,27 @@ export default function Generate() {
 
       localDb.insert("timetable_entries", rowsToInsert);
 
-      // 10. Independent final validation. Re-derives every hard constraint
-      // from the raw entries alone — never trusts the generator's own
-      // bookkeeping. A generated timetable can only ever be reported VALID
-      // or VALID_WITH_WARNINGS if this independently agrees.
+      // 10. Independent final validation — a black-box audit. Takes ONLY
+      // the raw entries plus the same school/teacher/requirement inputs the
+      // generator was given; it never sees the generator's own "unplaced"
+      // list or "searchBudgetExceeded" flag, so its determination of
+      // whether every requirement's periods were actually satisfied is
+      // fully independent, not just its double-booking/etc. checks.
       const finalReport = validateGeneratedTimetable({
         school: schoolConfig,
         teachers,
         requirements: lessons,
         entries: result.entries,
-        unplaced: result.unplaced,
-        searchBudgetExceeded: result.searchBudgetExceeded,
       });
+      // Anything other than an honest "fewer periods placed than required"
+      // fact is a structural problem — must never happen, regardless of
+      // what the generator itself reports about its own completeness.
+      const structuralIssues = finalReport.issues.filter(isStructuralIssue);
 
       const generationStatus = classifyGenerationStatus(result, finalReport);
       let message: string;
-      if (!finalReport.valid) {
-        message = `VALIDATION FAILED — the independent final check found ${finalReport.issues.length} hard-constraint problem(s) in the generated timetable that the generator itself didn't report. This should never happen; treat this result as untrustworthy. Details below.`;
+      if (structuralIssues.length > 0) {
+        message = `VALIDATION FAILED — the independent final check found ${structuralIssues.length} hard-constraint problem(s) in the generated timetable that the generator itself didn't report. This should never happen; treat this result as untrustworthy. Details below.`;
       } else if (generationStatus === "search_exhausted") {
         message = `SEARCH EXHAUSTED — the scheduler reached its search limit before finding a complete timetable (${result.unplaced.length} period(s) still unplaced). This does NOT prove the configuration is impossible — it means the search ran out of time/steps. Try generating again, or simplify the configuration if this keeps happening.`;
       } else if (generationStatus === "incomplete") {
@@ -261,7 +265,7 @@ export default function Generate() {
         unplaced: result.unplaced,
         softViolations: result.softViolations,
         searchBudgetExceeded: result.searchBudgetExceeded,
-        finalIssues: finalReport.valid ? undefined : finalReport.issues,
+        finalIssues: structuralIssues.length > 0 ? structuralIssues : undefined,
         names,
         message,
       });

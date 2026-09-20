@@ -207,6 +207,11 @@ export interface FinalValidationIssue {
   roomId?: string;
   day?: string;
   period?: number;
+  // Only present for kind === "required_period_count_mismatch": "under"
+  // means fewer periods were placed than required (expected whenever a run
+  // is genuinely incomplete), "over" means more were placed than required
+  // (never legitimate, under any circumstance).
+  direction?: "under" | "over";
 }
 
 export interface FinalValidationReport {

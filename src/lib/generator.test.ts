@@ -217,8 +217,6 @@ describe("a genuinely feasible requirement generates successfully", () => {
       teachers,
       requirements: lessons,
       entries: result.entries,
-      unplaced: result.unplaced,
-      searchBudgetExceeded: result.searchBudgetExceeded,
     });
     expect(finalReport.valid).toBe(true);
     expect(classifyGenerationStatus(result, finalReport)).toBe("valid");
@@ -245,8 +243,6 @@ describe("a soft-preference violation keeps the result VALID_WITH_WARNINGS, not 
       teachers,
       requirements: lessons,
       entries: result.entries,
-      unplaced: result.unplaced,
-      searchBudgetExceeded: result.searchBudgetExceeded,
     });
     expect(finalReport.valid).toBe(true);
     expect(classifyGenerationStatus(result, finalReport)).toBe("valid_with_warnings");
@@ -324,39 +320,50 @@ describe("fixed days are always intersected with working days", () => {
 });
 
 describe("SEARCH_EXHAUSTED is distinct from INCOMPLETE and never claims impossibility", () => {
-  it("a run that hit its search budget with unplaced periods classifies as search_exhausted, not incomplete", () => {
-    // classifyGenerationStatus doesn't run the search itself — this directly
-    // exercises the classification logic for the case where the generator
-    // ran out of budget (searchBudgetExceeded: true) rather than proving
-    // every unplaced unit has no valid slot.
-    const result = {
-      unplaced: [{ lessonRequirementId: "r1", classSectionId: "c1", subjectId: "s1", teacherId: "t1", reason: "budget" }],
-      softViolations: [],
-      searchBudgetExceeded: true,
-    };
-    const finalReport = { valid: true, issues: [] };
-    expect(classifyGenerationStatus(result, finalReport)).toBe("search_exhausted");
+  // classifyGenerationStatus no longer looks at result.unplaced at all — the
+  // only source of truth for "is this run genuinely short of periods" is
+  // finalValidation's own independently-derived "under" mismatch issues.
+  // `result.searchBudgetExceeded` is consulted ONLY to pick which honest
+  // label (INCOMPLETE vs SEARCH_EXHAUSTED) describes an
+  // already-independently-confirmed shortfall.
+  const shortfallReport = {
+    valid: false,
+    issues: [
+      {
+        kind: "required_period_count_mismatch" as const,
+        lessonRequirementId: "r1",
+        classSectionId: "c1",
+        subjectId: "s1",
+        teacherId: "t1",
+        direction: "under" as const,
+        reason: "Requires 5 period(s)/week but the timetable has 3.",
+      },
+    ],
+  };
+
+  it("a run that hit its search budget with a genuine shortfall classifies as search_exhausted, not incomplete", () => {
+    const result = { softViolations: [], searchBudgetExceeded: true };
+    expect(classifyGenerationStatus(result, shortfallReport)).toBe("search_exhausted");
   });
 
-  it("a run with unplaced periods but NO budget exhaustion classifies as incomplete, not search_exhausted", () => {
-    const result = {
-      unplaced: [{ lessonRequirementId: "r1", classSectionId: "c1", subjectId: "s1", teacherId: "t1", reason: "proven impossible given other placements" }],
-      softViolations: [],
-      searchBudgetExceeded: false,
-    };
-    const finalReport = { valid: true, issues: [] };
-    expect(classifyGenerationStatus(result, finalReport)).toBe("incomplete");
+  it("a run with a genuine shortfall but NO budget exhaustion classifies as incomplete, not search_exhausted", () => {
+    const result = { softViolations: [], searchBudgetExceeded: false };
+    expect(classifyGenerationStatus(result, shortfallReport)).toBe("incomplete");
   });
 
   it("search_exhausted is never reported as invalid_configuration — that status is reserved for feasibility.ts, pre-generation", () => {
-    const result = {
-      unplaced: [{ lessonRequirementId: "r1", classSectionId: "c1", subjectId: "s1", teacherId: "t1", reason: "budget" }],
-      softViolations: [],
-      searchBudgetExceeded: true,
-    };
-    const finalReport = { valid: true, issues: [] };
-    const status = classifyGenerationStatus(result, finalReport);
+    const result = { softViolations: [], searchBudgetExceeded: true };
+    const status = classifyGenerationStatus(result, shortfallReport);
     expect(status).not.toBe("invalid_configuration");
     expect(status).not.toBe("incomplete");
+  });
+
+  it("searchBudgetExceeded alone, with NO independently-confirmed shortfall, does not force search_exhausted", () => {
+    // Proves the classifier isn't just echoing the flag — a clean final
+    // report (no shortfall found) means there's nothing to label as
+    // exhausted or incomplete, regardless of what searchBudgetExceeded says.
+    const result = { softViolations: [], searchBudgetExceeded: true };
+    const cleanReport = { valid: true, issues: [] };
+    expect(classifyGenerationStatus(result, cleanReport)).toBe("valid");
   });
 });
