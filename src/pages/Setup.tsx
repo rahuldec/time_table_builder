@@ -115,6 +115,19 @@ function SchoolSettings({ school, onSaved }: { school: School | null; onSaved: (
     const payload = { name, working_days: days, periods_per_day: periodsPerDay, blocked_periods: blocked };
     if (school) {
       localDb.update("schools", school.id, payload);
+      // A requirement pinned to a day that's just been dropped from the
+      // working week (e.g. switching Sat off) would otherwise sit there as
+      // a dead, unusable pin — generator.ts already guards against actually
+      // scheduling it, but there's no reason to leave stale days lying
+      // around for someone to be confused by later.
+      const reqs = localDb.select("lesson_requirements", { school_id: school.id });
+      for (const r of reqs) {
+        const currentDays = (r.days as string[] | undefined) ?? [];
+        const pruned = currentDays.filter((d) => days.includes(d));
+        if (pruned.length !== currentDays.length) {
+          localDb.update("lesson_requirements", r.id, { days: pruned });
+        }
+      }
     } else {
       localDb.insert("schools", payload);
     }
@@ -804,7 +817,7 @@ function RoomsCard({ schoolId }: { schoolId: string }) {
 // Lesson requirements — "this class needs this subject from this teacher,
 // N times a week". This is the data the generator actually reads.
 // =====================================================================
-function LessonRequirementsCard({ schoolId }: { schoolId: string }) {
+function LessonRequirementsCard({ schoolId, workingDays }: { schoolId: string; workingDays: string[] }) {
   const { data, loading, remove, update } = useTable<LessonRequirementRow>(
     "lesson_requirements",
     { school_id: schoolId }
@@ -889,7 +902,11 @@ function LessonRequirementsCard({ schoolId }: { schoolId: string }) {
                       };
                       return (
                         <div className="flex gap-1 flex-nowrap">
-                          {ALL_DAYS.map((d) => (
+                          {/* Only offer days the school actually works — picking a day
+                              that isn't a working day would create a requirement Generate
+                              can never place there anyway (and the school could still be
+                              mid-transition after a working-days change, until it's saved). */}
+                          {ALL_DAYS.filter((d) => workingDays.includes(d)).map((d) => (
                             <button
                               key={d}
                               type="button"
@@ -1069,7 +1086,7 @@ export default function Setup() {
       id: "requirements",
       label: "Requirements",
       remountOnImport: true,
-      content: <LessonRequirementsCard schoolId={school.id} />,
+      content: <LessonRequirementsCard schoolId={school.id} workingDays={school.working_days} />,
     },
   ];
 

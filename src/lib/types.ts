@@ -48,9 +48,12 @@ export interface LessonRequirement {
   fixedDays?: string[]; // if non-empty, every period of this requirement must land on one of these days (hard constraint)
 
   // ----- rule flags, copied from the subject at generation time -----
-  avoidFirstPeriod?: boolean;   // never place this subject in the day's first teaching period
-  avoidLastPeriod?: boolean;    // never place this subject in the day's last teaching period
-  allowRepeatSameDay?: boolean; // if false (default), the same subject won't repeat twice in one day for the same class, unless there's truly no other way to fit it in
+  avoidFirstPeriod?: boolean;   // never place this subject in the day's first teaching period (soft)
+  avoidLastPeriod?: boolean;    // never place this subject in the day's last teaching period (soft)
+  // Hard constraint (default false = no repeat). When false, the same
+  // subject may occur at most once per class-section per day — full stop,
+  // never relaxed. When true, repeats are allowed with no penalty.
+  allowRepeatSameDay?: boolean;
 }
 
 // A pair of teachers who should never teach back-to-back for the same class
@@ -76,9 +79,91 @@ export interface UnplacedItem {
   reason: string;
 }
 
+// A soft (never hard) rule that had to be broken to fit a unit in, reported
+// individually rather than as a bare count.
+export interface SoftViolation {
+  lessonRequirementId: string;
+  classSectionId: string;
+  subjectId: string;
+  teacherId: string;
+  day: string;
+  period: number;
+  reason: string; // e.g. "avoid-first-period", "avoid-last-period", "teacher-adjacency"
+}
+
 export interface GenerationResult {
   entries: TimetableEntry[];
   unplaced: UnplacedItem[];
-  score: number; // lower is better - used to pick best of N random restarts
-  ruleViolations: number; // how many placements had to break a soft rule (repeat-in-day, first/last period, adjacency) to fit everything in
+  score: number; // lower is better - used to pick best of N attempts
+  /** @deprecated count form of softViolations.length, kept for existing callers */
+  ruleViolations: number;
+  softViolations: SoftViolation[];
+  // true if the backtracking search hit its step/time budget before
+  // exhausting the search space for one or more units — the resulting
+  // "unplaced" list for those units is not a proof of infeasibility, just
+  // as far as the search got in the time allowed.
+  searchBudgetExceeded: boolean;
+}
+
+// ===== Pre-generation feasibility / validation =====
+
+export type GenerationStatus =
+  | "valid" // every period placed, zero hard constraints violated, zero soft violations
+  | "valid_with_warnings" // every period placed, zero hard constraints violated, some soft preferences relaxed
+  | "incomplete" // configuration is feasible in principle but some periods could not be placed
+  | "invalid_configuration"; // the requirements are mathematically contradictory — generation was not attempted
+
+export interface RequirementFeasibilityIssue {
+  kind: "requirement_infeasible";
+  lessonRequirementId: string;
+  classSectionId: string;
+  subjectId: string;
+  teacherId: string;
+  required: number;
+  maxPossible: number;
+  allowedDays: string[];
+  reason: string;
+}
+
+export interface FixedDayIssue {
+  kind: "fixed_day_not_working";
+  lessonRequirementId: string;
+  invalidDays: string[]; // entries in fixedDays that aren't in workingDays
+  workingDays: string[];
+  reason: string;
+}
+
+export interface TeacherCapacityIssue {
+  kind: "teacher_capacity_exceeded";
+  teacherId: string;
+  required: number;
+  maximum: number;
+  shortage: number;
+  scope: "week" | "day";
+  day?: string; // present when scope === "day"
+  reason: string;
+}
+
+export interface ReferenceIssue {
+  kind: "invalid_reference";
+  lessonRequirementId: string;
+  missing: ("classSectionId" | "subjectId" | "teacherId" | "roomId")[];
+  reason: string;
+}
+
+export interface SchoolConfigIssue {
+  kind: "school_config_invalid";
+  reason: string;
+}
+
+export type ConfigurationIssue =
+  | RequirementFeasibilityIssue
+  | FixedDayIssue
+  | TeacherCapacityIssue
+  | ReferenceIssue
+  | SchoolConfigIssue;
+
+export interface FeasibilityReport {
+  valid: boolean;
+  issues: ConfigurationIssue[];
 }
