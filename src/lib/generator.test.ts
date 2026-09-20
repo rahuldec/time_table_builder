@@ -367,3 +367,50 @@ describe("SEARCH_EXHAUSTED is distinct from INCOMPLETE and never claims impossib
     expect(classifyGenerationStatus(result, cleanReport)).toBe("valid");
   });
 });
+
+describe("over-placement and other structural violations are never classified as a normal incomplete/exhausted result", () => {
+  const overPlacementReport = {
+    valid: false,
+    issues: [
+      {
+        kind: "required_period_count_mismatch" as const,
+        lessonRequirementId: "r1",
+        classSectionId: "c1",
+        subjectId: "s1",
+        teacherId: "t1",
+        direction: "over" as const,
+        reason: "Requires 1 period(s)/week but the timetable has 2.",
+      },
+    ],
+  };
+
+  it("an over-placement classifies as validation_failed, never incomplete", () => {
+    const result = { softViolations: [], searchBudgetExceeded: false };
+    expect(classifyGenerationStatus(result, overPlacementReport)).toBe("validation_failed");
+  });
+
+  it("an over-placement classifies as validation_failed even when searchBudgetExceeded is true — never search_exhausted", () => {
+    const result = { softViolations: [], searchBudgetExceeded: true };
+    expect(classifyGenerationStatus(result, overPlacementReport)).toBe("validation_failed");
+  });
+
+  it("a double-booking (or any other structural issue) is likewise never folded into incomplete/search_exhausted", () => {
+    const structuralReport = {
+      valid: false,
+      issues: [{ kind: "teacher_double_booking" as const, teacherId: "t1", day: "Mon", period: 1, reason: "double-booked" }],
+    };
+    expect(classifyGenerationStatus({ softViolations: [], searchBudgetExceeded: false }, structuralReport)).toBe("validation_failed");
+    expect(classifyGenerationStatus({ softViolations: [], searchBudgetExceeded: true }, structuralReport)).toBe("validation_failed");
+  });
+
+  it("validation_failed is distinct from every other status value", () => {
+    const result = { softViolations: [], searchBudgetExceeded: false };
+    const status = classifyGenerationStatus(result, overPlacementReport);
+    expect(status).not.toBe("valid");
+    expect(status).not.toBe("valid_with_warnings");
+    expect(status).not.toBe("incomplete");
+    expect(status).not.toBe("search_exhausted");
+    expect(status).not.toBe("invalid_configuration");
+    expect(status).toBe("validation_failed");
+  });
+});

@@ -155,8 +155,31 @@ export function physicalWeeklyCapacity(school: SchoolConfig): number {
   return availablePeriodsPerDay(school) * school.workingDays.length;
 }
 
+// A teacher's OWN physical capacity is the school's total weekly slots
+// minus whichever of their declared-unavailable slots actually fall on a
+// real, schedulable slot (a working day, an in-range and non-blocked
+// period). An unavailable entry pointing at a slot that could never be
+// scheduled anyway (a non-working day, a blocked period, an out-of-range
+// period) doesn't reduce capacity further — it wasn't available regardless.
+// Duplicate unavailable entries for the same slot are only counted once.
+export function teacherPhysicalWeeklyCapacity(teacher: Teacher, school: SchoolConfig): number {
+  const totalSlots = physicalWeeklyCapacity(school);
+  const validUnavailableSlots = new Set(
+    (teacher.unavailable ?? [])
+      .filter(
+        (s) =>
+          school.workingDays.includes(s.day) &&
+          s.period >= 1 &&
+          s.period <= school.periodsPerDay &&
+          !isBlocked(school, s.period)
+      )
+      .map((s) => `${s.day}#${s.period}`)
+  );
+  return Math.max(0, totalSlots - validUnavailableSlots.size);
+}
+
 export function effectiveWeeklyCapacity(teacher: Teacher, school: SchoolConfig): number {
-  const physical = physicalWeeklyCapacity(school);
+  const physical = teacherPhysicalWeeklyCapacity(teacher, school);
   return teacher.maxPeriodsPerWeek != null ? Math.min(teacher.maxPeriodsPerWeek, physical) : physical;
 }
 

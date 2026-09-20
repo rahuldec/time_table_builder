@@ -27,7 +27,12 @@ function req(overrides: Partial<LessonRequirement> & { id: string }): LessonRequ
   };
 }
 
-function entry(overrides: Partial<TimetableEntry> & { day: string; period: number }): TimetableEntry {
+// lessonRequirementId is a REQUIRED override (not defaulted) — every call
+// site must say explicitly which requirement this entry belongs to, so a
+// test can never accidentally rely on composite-key guesswork.
+function entry(
+  overrides: Partial<TimetableEntry> & { day: string; period: number; lessonRequirementId: string }
+): TimetableEntry {
   return { classSectionId: "class-1", subjectId: "subj-1", teacherId: "teacher-1", ...overrides };
 }
 
@@ -49,8 +54,8 @@ describe("validateGeneratedTimetable — catches every hard-constraint violation
       req({ id: "r2", classSectionId: "class-2", teacherId: "teacher-1" }),
     ];
     const entries = [
-      entry({ day: "Mon", period: 1, classSectionId: "class-1", teacherId: "teacher-1" }),
-      entry({ day: "Mon", period: 1, classSectionId: "class-2", teacherId: "teacher-1" }),
+      entry({ day: "Mon", period: 1, classSectionId: "class-1", teacherId: "teacher-1", lessonRequirementId: "r1" }),
+      entry({ day: "Mon", period: 1, classSectionId: "class-2", teacherId: "teacher-1", lessonRequirementId: "r2" }),
     ];
     const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
     expect(report.valid).toBe(false);
@@ -64,8 +69,8 @@ describe("validateGeneratedTimetable — catches every hard-constraint violation
       req({ id: "r2", classSectionId: "class-1", subjectId: "subj-2", teacherId: "teacher-2" }),
     ];
     const entries = [
-      entry({ day: "Mon", period: 1, classSectionId: "class-1", subjectId: "subj-1", teacherId: "teacher-1" }),
-      entry({ day: "Mon", period: 1, classSectionId: "class-1", subjectId: "subj-2", teacherId: "teacher-2" }),
+      entry({ day: "Mon", period: 1, classSectionId: "class-1", subjectId: "subj-1", teacherId: "teacher-1", lessonRequirementId: "r1" }),
+      entry({ day: "Mon", period: 1, classSectionId: "class-1", subjectId: "subj-2", teacherId: "teacher-2", lessonRequirementId: "r2" }),
     ];
     const report = validateGeneratedTimetable(
       baseInput({ teachers: [teacher("teacher-1"), teacher("teacher-2")], requirements, entries })
@@ -81,8 +86,8 @@ describe("validateGeneratedTimetable — catches every hard-constraint violation
       req({ id: "r2", classSectionId: "class-2", teacherId: "teacher-2", roomId: "room-1" }),
     ];
     const entries = [
-      entry({ day: "Mon", period: 1, classSectionId: "class-1", teacherId: "teacher-1", roomId: "room-1" }),
-      entry({ day: "Mon", period: 1, classSectionId: "class-2", teacherId: "teacher-2", roomId: "room-1" }),
+      entry({ day: "Mon", period: 1, classSectionId: "class-1", teacherId: "teacher-1", roomId: "room-1", lessonRequirementId: "r1" }),
+      entry({ day: "Mon", period: 1, classSectionId: "class-2", teacherId: "teacher-2", roomId: "room-1", lessonRequirementId: "r2" }),
     ];
     const report = validateGeneratedTimetable(
       baseInput({ teachers: [teacher("teacher-1"), teacher("teacher-2")], requirements, entries })
@@ -95,8 +100,8 @@ describe("validateGeneratedTimetable — catches every hard-constraint violation
   it("catches a no-repeat-same-day violation", () => {
     const requirements = [req({ id: "r1", periodsPerWeek: 2, allowRepeatSameDay: false })];
     const entries = [
-      entry({ day: "Mon", period: 1 }),
-      entry({ day: "Mon", period: 2 }),
+      entry({ day: "Mon", period: 1, lessonRequirementId: "r1" }),
+      entry({ day: "Mon", period: 2, lessonRequirementId: "r1" }),
     ];
     const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
     expect(report.valid).toBe(false);
@@ -106,7 +111,7 @@ describe("validateGeneratedTimetable — catches every hard-constraint violation
   // Case 5
   it("catches a fixed-day violation", () => {
     const requirements = [req({ id: "r1", fixedDays: ["Mon"] })];
-    const entries = [entry({ day: "Tue", period: 1 })];
+    const entries = [entry({ day: "Tue", period: 1, lessonRequirementId: "r1" })];
     const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
     expect(report.valid).toBe(false);
     expect(report.issues.some((i) => i.kind === "fixed_day_violation")).toBe(true);
@@ -115,7 +120,7 @@ describe("validateGeneratedTimetable — catches every hard-constraint violation
   // Case 6
   it("catches placement on a non-working day", () => {
     const requirements = [req({ id: "r1" })];
-    const entries = [entry({ day: "Sat", period: 1 })]; // school() only works Mon-Fri
+    const entries = [entry({ day: "Sat", period: 1, lessonRequirementId: "r1" })]; // school() only works Mon-Fri
     const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
     expect(report.valid).toBe(false);
     expect(report.issues.some((i) => i.kind === "non_working_day")).toBe(true);
@@ -124,7 +129,7 @@ describe("validateGeneratedTimetable — catches every hard-constraint violation
   // Case 7
   it("catches a teacher-unavailable-period violation", () => {
     const requirements = [req({ id: "r1" })];
-    const entries = [entry({ day: "Mon", period: 1 })];
+    const entries = [entry({ day: "Mon", period: 1, lessonRequirementId: "r1" })];
     const teachers = [teacher("teacher-1", { unavailable: [{ day: "Mon", period: 1 }] })];
     const report = validateGeneratedTimetable(baseInput({ teachers, requirements, entries }));
     expect(report.valid).toBe(false);
@@ -134,7 +139,7 @@ describe("validateGeneratedTimetable — catches every hard-constraint violation
   // Case 8
   it("catches an incorrect required-period count — computed purely from entries vs. requirements, no generator flags involved", () => {
     const requirements = [req({ id: "r1", periodsPerWeek: 3 })];
-    const entries = [entry({ day: "Mon", period: 1 })]; // only 1 of 3 placed
+    const entries = [entry({ day: "Mon", period: 1, lessonRequirementId: "r1" })]; // only 1 of 3 placed
     // Note: FinalValidationInput has no `unplaced`/`searchBudgetExceeded`
     // fields at all — this call can't lean on them even if it wanted to.
     const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
@@ -149,7 +154,7 @@ describe("validateGeneratedTimetable — catches every hard-constraint violation
     // result must be identical every time, since there is no generator
     // context this function could possibly consult to vary its answer.
     const requirements = [req({ id: "r1", periodsPerWeek: 3 })];
-    const entries = [entry({ day: "Mon", period: 1 })];
+    const entries = [entry({ day: "Mon", period: 1, lessonRequirementId: "r1" })];
     const reportA = validateGeneratedTimetable(baseInput({ requirements, entries }));
     const reportB = validateGeneratedTimetable(baseInput({ requirements, entries }));
     expect(reportA.issues.some((i) => i.kind === "required_period_count_mismatch")).toBe(true);
@@ -158,7 +163,10 @@ describe("validateGeneratedTimetable — catches every hard-constraint violation
 
   it("always flags over-placement, tagged with direction 'over'", () => {
     const requirements = [req({ id: "r1", periodsPerWeek: 1 })];
-    const entries = [entry({ day: "Mon", period: 1 }), entry({ day: "Tue", period: 1 })]; // 2 placed, 1 required
+    const entries = [
+      entry({ day: "Mon", period: 1, lessonRequirementId: "r1" }),
+      entry({ day: "Tue", period: 1, lessonRequirementId: "r1" }),
+    ]; // 2 placed, 1 required
     const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
     expect(report.valid).toBe(false);
     const issue = report.issues.find((i) => i.kind === "required_period_count_mismatch");
@@ -173,7 +181,10 @@ describe("validateGeneratedTimetable — catches every hard-constraint violation
     ];
     // Two periods on the same day, but NOT consecutive — should be one
     // adjacent block, not two isolated singles.
-    const entries = [entry({ day: "Mon", period: 1 }), entry({ day: "Mon", period: 3 })];
+    const entries = [
+      entry({ day: "Mon", period: 1, lessonRequirementId: "r1" }),
+      entry({ day: "Mon", period: 3, lessonRequirementId: "r1" }),
+    ];
     const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
     expect(report.valid).toBe(false);
     expect(report.issues.some((i) => i.kind === "double_period_continuity_violation")).toBe(true);
@@ -183,7 +194,10 @@ describe("validateGeneratedTimetable — catches every hard-constraint violation
     const requirements = [
       req({ id: "r1", periodsPerWeek: 2, isLab: true, allowRepeatSameDay: true }),
     ];
-    const entries = [entry({ day: "Mon", period: 1 }), entry({ day: "Mon", period: 2 })];
+    const entries = [
+      entry({ day: "Mon", period: 1, lessonRequirementId: "r1" }),
+      entry({ day: "Mon", period: 2, lessonRequirementId: "r1" }),
+    ];
     const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
     expect(report.issues.some((i) => i.kind === "double_period_continuity_violation")).toBe(false);
   });
@@ -192,11 +206,11 @@ describe("validateGeneratedTimetable — catches every hard-constraint violation
   it("a genuinely valid timetable passes final validation with zero issues", () => {
     const requirements = [req({ id: "r1", periodsPerWeek: 5, allowRepeatSameDay: false })];
     const entries = [
-      entry({ day: "Mon", period: 1 }),
-      entry({ day: "Tue", period: 1 }),
-      entry({ day: "Wed", period: 1 }),
-      entry({ day: "Thu", period: 1 }),
-      entry({ day: "Fri", period: 1 }),
+      entry({ day: "Mon", period: 1, lessonRequirementId: "r1" }),
+      entry({ day: "Tue", period: 1, lessonRequirementId: "r1" }),
+      entry({ day: "Wed", period: 1, lessonRequirementId: "r1" }),
+      entry({ day: "Thu", period: 1, lessonRequirementId: "r1" }),
+      entry({ day: "Fri", period: 1, lessonRequirementId: "r1" }),
     ];
     const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
     expect(report.valid).toBe(true);
@@ -225,6 +239,50 @@ describe("effective teacher capacity — physical vs. explicit cap", () => {
     const t = teacher("t1", { maxPeriodsPerWeek: 20 });
     expect(effectiveWeeklyCapacity(t, s)).toBe(20);
   });
+
+  it("teacher-specific unavailable slots reduce physical capacity: 5x8=40 minus 10 valid unavailable slots = 30", () => {
+    const s = school(); // Mon-Fri, 8 periods/day, none blocked -> 40 total slots
+    const unavailable = [];
+    for (let p = 1; p <= 8; p++) unavailable.push({ day: "Mon", period: p }); // 8 slots
+    unavailable.push({ day: "Tue", period: 1 }, { day: "Tue", period: 2 }); // +2 slots = 10
+    const t = teacher("t1", { unavailable });
+    expect(effectiveWeeklyCapacity(t, s)).toBe(30);
+  });
+
+  it("unavailable slots on a non-working day don't reduce capacity — that slot was never available anyway", () => {
+    const s = school(); // Mon-Fri only
+    const t = teacher("t1", { unavailable: [{ day: "Sat", period: 1 }] });
+    expect(effectiveWeeklyCapacity(t, s)).toBe(40);
+  });
+
+  it("unavailable slots on a blocked period don't reduce capacity", () => {
+    const s = school({ blockedPeriods: [4] });
+    const t = teacher("t1", { unavailable: [{ day: "Mon", period: 4 }] }); // period 4 already excluded from the 35 available
+    // physical = 5 days * 7 available periods/day = 35; the unavailable entry duplicates an already-excluded slot
+    expect(effectiveWeeklyCapacity(t, s)).toBe(35);
+  });
+
+  it("unavailable slots with an out-of-range period don't reduce capacity", () => {
+    const s = school({ periodsPerDay: 8 });
+    const t = teacher("t1", { unavailable: [{ day: "Mon", period: 0 }, { day: "Mon", period: 99 }] });
+    expect(effectiveWeeklyCapacity(t, s)).toBe(40);
+  });
+
+  it("duplicate unavailable entries for the same slot are only counted once", () => {
+    const s = school();
+    const t = teacher("t1", { unavailable: [{ day: "Mon", period: 1 }, { day: "Mon", period: 1 }, { day: "Mon", period: 1 }] });
+    expect(effectiveWeeklyCapacity(t, s)).toBe(39); // one slot removed, not three
+  });
+
+  it("teacher-unavailable-driven physical capacity still combines with an explicit cap via min()", () => {
+    const s = school(); // 40 total slots
+    const unavailable = [];
+    for (let p = 1; p <= 8; p++) unavailable.push({ day: "Mon", period: p }); // 8 unavailable -> physical = 32
+    const looseCap = teacher("t1", { unavailable, maxPeriodsPerWeek: 35 }); // explicit cap looser than physical(32)
+    expect(effectiveWeeklyCapacity(looseCap, s)).toBe(32);
+    const tightCap = teacher("t2", { unavailable, maxPeriodsPerWeek: 10 }); // explicit cap tighter than physical(32)
+    expect(effectiveWeeklyCapacity(tightCap, s)).toBe(10);
+  });
 });
 
 describe("teacher over-subscription reporting", () => {
@@ -243,6 +301,136 @@ describe("teacher over-subscription reporting", () => {
       .map((i) => (i.kind === "teacher_capacity_exceeded" ? i.teacherId : ""));
     expect(flaggedTeacherIds).toEqual(expect.arrayContaining(["t1", "t2"]));
     expect(flaggedTeacherIds).not.toContain("t3");
+  });
+
+  it("teacher_weekly_max_exceeded in the final validator honors teacher-unavailable-adjusted capacity, not just the raw school physical cap", () => {
+    const s = school({ workingDays: ["Mon"], periodsPerDay: 8 }); // 8 total slots/week
+    // Unavailable for periods 5-8 -> physical capacity drops to 4.
+    const t = teacher("teacher-1", {
+      unavailable: [{ day: "Mon", period: 5 }, { day: "Mon", period: 6 }, { day: "Mon", period: 7 }, { day: "Mon", period: 8 }],
+    });
+    const requirements = [req({ id: "r1", periodsPerWeek: 4, allowRepeatSameDay: true })];
+    // 5 entries placed, one of which (period 4) pushes weekly count to 5 > effective cap of 4.
+    const entries = [
+      entry({ day: "Mon", period: 1, lessonRequirementId: "r1" }),
+      entry({ day: "Mon", period: 2, lessonRequirementId: "r1" }),
+      entry({ day: "Mon", period: 3, lessonRequirementId: "r1" }),
+      entry({ day: "Mon", period: 4, lessonRequirementId: "r1" }),
+    ];
+    // First confirm 4 placed against 4 required passes cleanly at the reduced cap...
+    const cleanReport = validateGeneratedTimetable({ school: s, teachers: [t], requirements, entries });
+    expect(cleanReport.issues.some((i) => i.kind === "teacher_weekly_max_exceeded")).toBe(false);
+
+    // ...then confirm a 5th (still within the raw school capacity of 8, but
+    // over the teacher's unavailability-adjusted capacity of 4) is caught.
+    const req5 = [req({ id: "r1", periodsPerWeek: 5, allowRepeatSameDay: true })];
+    const entries5 = [...entries, entry({ day: "Mon", period: 1, lessonRequirementId: "r1" })];
+    const overloadedReport = validateGeneratedTimetable({ school: s, teachers: [t], requirements: req5, entries: entries5 });
+    expect(overloadedReport.issues.some((i) => i.kind === "teacher_weekly_max_exceeded")).toBe(true);
+  });
+});
+
+describe("room validation — finalValidator independently checks requirement.roomId", () => {
+  it("a correct room produces no room_mismatch issue", () => {
+    const requirements = [req({ id: "r1", roomId: "room-A" })];
+    const entries = [entry({ day: "Mon", period: 1, roomId: "room-A", lessonRequirementId: "r1" })];
+    const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
+    expect(report.issues.some((i) => i.kind === "room_mismatch")).toBe(false);
+  });
+
+  it("a wrong room is caught as room_mismatch", () => {
+    const requirements = [req({ id: "r1", roomId: "room-A" })];
+    const entries = [entry({ day: "Mon", period: 1, roomId: "room-B", lessonRequirementId: "r1" })];
+    const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
+    expect(report.valid).toBe(false);
+    const issue = report.issues.find((i) => i.kind === "room_mismatch");
+    expect(issue).toBeDefined();
+    expect(issue?.roomId).toBe("room-B");
+  });
+
+  it("a missing room (entry has no room at all) is caught as room_mismatch when one is required", () => {
+    const requirements = [req({ id: "r1", roomId: "room-A" })];
+    const entries = [entry({ day: "Mon", period: 1, lessonRequirementId: "r1" })]; // no roomId set
+    const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
+    expect(report.valid).toBe(false);
+    expect(report.issues.some((i) => i.kind === "room_mismatch")).toBe(true);
+  });
+
+  it("a requirement with NO roomId set accepts any room, or none — unchanged behavior", () => {
+    const requirements = [req({ id: "r1" })]; // no roomId
+    const withRoom = [entry({ day: "Mon", period: 1, roomId: "any-room", lessonRequirementId: "r1" })];
+    const withoutRoom = [entry({ day: "Mon", period: 1, lessonRequirementId: "r1" })];
+    expect(
+      validateGeneratedTimetable(baseInput({ requirements, entries: withRoom })).issues.some((i) => i.kind === "room_mismatch")
+    ).toBe(false);
+    expect(
+      validateGeneratedTimetable(baseInput({ requirements, entries: withoutRoom })).issues.some((i) => i.kind === "room_mismatch")
+    ).toBe(false);
+  });
+});
+
+describe("period range validation", () => {
+  it("catches period 0 as out of range", () => {
+    const requirements = [req({ id: "r1" })];
+    const entries = [entry({ day: "Mon", period: 0, lessonRequirementId: "r1" })];
+    const report = validateGeneratedTimetable(baseInput({ requirements, entries }));
+    expect(report.valid).toBe(false);
+    expect(report.issues.some((i) => i.kind === "period_out_of_range")).toBe(true);
+  });
+
+  it("catches a period greater than periodsPerDay as out of range", () => {
+    const s = school({ periodsPerDay: 8 });
+    const requirements = [req({ id: "r1" })];
+    const entries = [entry({ day: "Mon", period: 9, lessonRequirementId: "r1" })];
+    const report = validateGeneratedTimetable(baseInput({ school: s, requirements, entries }));
+    expect(report.valid).toBe(false);
+    expect(report.issues.some((i) => i.kind === "period_out_of_range")).toBe(true);
+  });
+
+  it("does not flag a period within range", () => {
+    const s = school({ periodsPerDay: 8 });
+    const requirements = [req({ id: "r1" })];
+    const entries = [entry({ day: "Mon", period: 8, lessonRequirementId: "r1" })];
+    const report = validateGeneratedTimetable(baseInput({ school: s, requirements, entries }));
+    expect(report.issues.some((i) => i.kind === "period_out_of_range")).toBe(false);
+  });
+});
+
+describe("requirement disambiguation — same class+subject+teacher, different room/day, must not merge", () => {
+  it("R1 (Room A, Monday) and R2 (Room B, Wednesday) are each independently validated against their own configuration", () => {
+    const requirements = [
+      req({ id: "R1", classSectionId: "class-1", subjectId: "subj-1", teacherId: "teacher-1", roomId: "Room A", fixedDays: ["Mon"], periodsPerWeek: 1 }),
+      req({ id: "R2", classSectionId: "class-1", subjectId: "subj-1", teacherId: "teacher-1", roomId: "Room B", fixedDays: ["Wed"], periodsPerWeek: 1 }),
+    ];
+    // Correctly-placed entries: R1 in Room A on Monday, R2 in Room B on Wednesday.
+    const correctEntries = [
+      entry({ day: "Mon", period: 1, roomId: "Room A", lessonRequirementId: "R1" }),
+      entry({ day: "Wed", period: 2, roomId: "Room B", lessonRequirementId: "R2" }),
+    ];
+    const cleanReport = validateGeneratedTimetable(baseInput({ requirements, entries: correctEntries }));
+    // A composite class+subject+teacher key would have merged these two
+    // requirements into one bucket; if that were still happening, checking
+    // R2's entry (Wed, Room B) against whichever requirement won the key
+    // collision would spuriously fail either the room or the fixed-day
+    // check. Zero issues proves each entry was checked against its own
+    // true originating requirement.
+    expect(cleanReport.valid).toBe(true);
+    expect(cleanReport.issues).toHaveLength(0);
+
+    // Now swap which requirement each entry claims to belong to: the
+    // Room-A/Monday entry claims to be R2 (which requires Room B, Wed) and
+    // vice versa. Both should now be caught, independently, with the
+    // correct requirement blamed for each.
+    const swappedEntries = [
+      entry({ day: "Mon", period: 1, roomId: "Room A", lessonRequirementId: "R2" }), // wrong room AND wrong day for R2
+      entry({ day: "Wed", period: 2, roomId: "Room B", lessonRequirementId: "R1" }), // wrong room AND wrong day for R1
+    ];
+    const swappedReport = validateGeneratedTimetable(baseInput({ requirements, entries: swappedEntries }));
+    expect(swappedReport.valid).toBe(false);
+    const roomIssues = swappedReport.issues.filter((i) => i.kind === "room_mismatch");
+    const dayIssues = swappedReport.issues.filter((i) => i.kind === "fixed_day_violation");
+    expect(roomIssues.map((i) => i.lessonRequirementId).sort()).toEqual(["R1", "R2"]);
+    expect(dayIssues.map((i) => i.lessonRequirementId).sort()).toEqual(["R1", "R2"]);
   });
 });
 

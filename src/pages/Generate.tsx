@@ -246,8 +246,8 @@ export default function Generate() {
 
       const generationStatus = classifyGenerationStatus(result, finalReport);
       let message: string;
-      if (structuralIssues.length > 0) {
-        message = `VALIDATION FAILED — the independent final check found ${structuralIssues.length} hard-constraint problem(s) in the generated timetable that the generator itself didn't report. This should never happen; treat this result as untrustworthy. Details below.`;
+      if (generationStatus === "validation_failed") {
+        message = `VALIDATION FAILED — the timetable contains ${structuralIssues.length} hard structural error(s) that the generator itself didn't report (e.g. a double-booking, a wrong/missing room, an out-of-range period, or an over-placement). This is NOT a normal incomplete or search-exhausted result — treat this timetable as untrustworthy. Details below.`;
       } else if (generationStatus === "search_exhausted") {
         message = `SEARCH EXHAUSTED — the scheduler reached its search limit before finding a complete timetable (${result.unplaced.length} period(s) still unplaced). This does NOT prove the configuration is impossible — it means the search ran out of time/steps. Try generating again, or simplify the configuration if this keeps happening.`;
       } else if (generationStatus === "incomplete") {

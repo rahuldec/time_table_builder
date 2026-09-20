@@ -373,6 +373,7 @@ function runBacktrackingAttempt(
     const unit = units[rec.unitIndex];
     for (const p of rec.periods) {
       entries.push({
+        lessonRequirementId: unit.lessonId,
         classSectionId: unit.classSectionId,
         subjectId: unit.subjectId,
         teacherId: unit.teacherId,
@@ -501,15 +502,18 @@ export function generateTimetable(opts: GenerateOptions): GenerationResult {
 // shortfall itself is real.
 //
 // Any *structural* final-validation issue (double-booking, a fixed-day
-// violation, an over-placement, etc. — anything other than an "under"
-// required_period_count_mismatch) means something is genuinely broken and
-// this can never return "valid" or "valid_with_warnings", regardless of
-// what `result` itself claims.
+// violation, a wrong/missing room, an out-of-range period, an
+// over-placement, etc. — anything other than an "under"
+// required_period_count_mismatch) means something is genuinely broken.
+// This is reported as its own distinct "validation_failed" status — never
+// folded into "incomplete" or "search_exhausted", which both describe a
+// normal, honest shortfall. A structural violation is never normal, so it
+// must never be hidden under language that sounds like one.
 export function classifyGenerationStatus(
   result: Pick<GenerationResult, "softViolations" | "searchBudgetExceeded">,
   finalValidation: FinalValidationReport
 ): GenerationStatus {
-  if (finalValidation.issues.some(isStructuralIssue)) return "incomplete";
+  if (finalValidation.issues.some(isStructuralIssue)) return "validation_failed";
 
   const hasShortfall = finalValidation.issues.some(
     (i) => i.kind === "required_period_count_mismatch" && i.direction === "under"

@@ -47,9 +47,6 @@ function slotKey(day: string, period: number): string {
 function entryKey(e: TimetableEntry): string {
   return `${e.classSectionId}::${e.subjectId}::${e.teacherId}::${e.roomId ?? ""}::${e.day}::${e.period}`;
 }
-function reqKey(classSectionId: string, subjectId: string, teacherId: string): string {
-  return `${classSectionId}::${subjectId}::${teacherId}`;
-}
 function classSubjectKey(classSectionId: string, subjectId: string): string {
   return `${classSectionId}::${subjectId}`;
 }
@@ -161,31 +158,55 @@ export function validateGeneratedTimetable(input: FinalValidationInput): FinalVa
     }
   }
 
-  // ---- per-requirement checks: allowed days, teacher availability, blocked
-  // periods, daily/weekly caps, required period counts ----
-  const requirementByKey = new Map<string, LessonRequirement>();
-  for (const r of requirements) requirementByKey.set(reqKey(r.classSectionId, r.subjectId, r.teacherId), r);
+  // ---- period range sanity check — independent of requirement matching,
+  // since a garbage period value is a data-integrity problem regardless of
+  // which requirement it claims to belong to ----
+  for (const e of entries) {
+    if (e.period < 1 || e.period > school.periodsPerDay) {
+      issues.push({
+        kind: "period_out_of_range",
+        lessonRequirementId: e.lessonRequirementId,
+        classSectionId: e.classSectionId,
+        subjectId: e.subjectId,
+        teacherId: e.teacherId,
+        day: e.day,
+        period: e.period,
+        reason: `Period ${e.period} is outside the valid range (1-${school.periodsPerDay}).`,
+      });
+    }
+  }
+
+  // ---- per-requirement checks: allowed days, teacher availability, room,
+  // blocked periods, daily/weekly caps, required period counts ----
+  //
+  // Matched by lessonRequirementId — never by class+subject+teacher alone.
+  // Two distinct requirements can legitimately share all three (different
+  // room, different fixed days), and a composite key would silently merge
+  // their entries into one bucket, checking each entry against whichever
+  // requirement happened to win the key collision instead of the one it
+  // actually came from.
+  const requirementById = new Map(requirements.map((r) => [r.id, r]));
 
   const entriesByRequirement = new Map<string, TimetableEntry[]>();
   const orphanEntries: TimetableEntry[] = [];
   for (const e of entries) {
-    const key = reqKey(e.classSectionId, e.subjectId, e.teacherId);
-    if (!requirementByKey.has(key)) {
+    if (!requirementById.has(e.lessonRequirementId)) {
       orphanEntries.push(e);
       continue;
     }
-    if (!entriesByRequirement.has(key)) entriesByRequirement.set(key, []);
-    entriesByRequirement.get(key)!.push(e);
+    if (!entriesByRequirement.has(e.lessonRequirementId)) entriesByRequirement.set(e.lessonRequirementId, []);
+    entriesByRequirement.get(e.lessonRequirementId)!.push(e);
   }
   for (const e of orphanEntries) {
     issues.push({
       kind: "duplicate_entry",
+      lessonRequirementId: e.lessonRequirementId,
       classSectionId: e.classSectionId,
       subjectId: e.subjectId,
       teacherId: e.teacherId,
       day: e.day,
       period: e.period,
-      reason: "This timetable entry doesn't match any current lesson requirement (class/subject/teacher).",
+      reason: "This timetable entry's lessonRequirementId doesn't match any current lesson requirement.",
     });
   }
 
@@ -193,12 +214,27 @@ export function validateGeneratedTimetable(input: FinalValidationInput): FinalVa
   const teacherWeeklyCount = new Map<string, number>();
 
   for (const req of requirements) {
-    const key = reqKey(req.classSectionId, req.subjectId, req.teacherId);
-    const reqEntries = entriesByRequirement.get(key) ?? [];
+    const reqEntries = entriesByRequirement.get(req.id) ?? [];
     const allowedDays = allowedDaysFor(req, school);
     const fixedDaysSet = req.fixedDays && req.fixedDays.length > 0;
 
     for (const e of reqEntries) {
+      if (req.roomId && e.roomId !== req.roomId) {
+        issues.push({
+          kind: "room_mismatch",
+          lessonRequirementId: req.id,
+          classSectionId: e.classSectionId,
+          subjectId: e.subjectId,
+          teacherId: e.teacherId,
+          roomId: e.roomId,
+          day: e.day,
+          period: e.period,
+          reason: e.roomId
+            ? `Requires room ${req.roomId} but was placed in room ${e.roomId}.`
+            : `Requires room ${req.roomId} but was placed without a room.`,
+        });
+      }
+
       if (isBlocked(school, e.period)) {
         issues.push({
           kind: "blocked_period",

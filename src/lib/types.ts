@@ -63,6 +63,11 @@ export interface TeacherPair {
 }
 
 export interface TimetableEntry {
+  // The originating requirement, unambiguously. Required — never derive a
+  // requirement/entry association from class+subject+teacher alone, since
+  // two distinct requirements can legitimately share all three (different
+  // room, different fixed days).
+  lessonRequirementId: string;
   classSectionId: string;
   subjectId: string;
   teacherId: string;
@@ -112,7 +117,8 @@ export type GenerationStatus =
   | "valid_with_warnings" // every period placed, zero hard constraints violated, some soft preferences relaxed
   | "incomplete" // search completed (did not hit its budget) but some periods could not be placed
   | "invalid_configuration" // the requirements are mathematically contradictory — generation was not attempted
-  | "search_exhausted"; // the search hit its step/time budget before finishing — NOT proof the configuration is impossible
+  | "search_exhausted" // the search hit its step/time budget before finishing — NOT proof the configuration is impossible
+  | "validation_failed"; // the independent final check found a structural hard-constraint violation the generator itself didn't report — never a normal outcome, never to be shown as incomplete/exhausted
 
 export interface RequirementFeasibilityIssue {
   kind: "requirement_infeasible";
@@ -195,7 +201,9 @@ export type FinalValidationIssueKind =
   | "teacher_weekly_max_exceeded"
   | "required_period_count_mismatch"
   | "double_period_continuity_violation"
-  | "duplicate_entry";
+  | "duplicate_entry"
+  | "room_mismatch"
+  | "period_out_of_range";
 
 export interface FinalValidationIssue {
   kind: FinalValidationIssueKind;
